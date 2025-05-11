@@ -9,6 +9,7 @@ from flask import Flask, render_template, redirect, url_for, flash, request, abo
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
 import os
 from flask_wtf.csrf import CSRFProtect
+from flask_migrate import Migrate
 
 
 class RoleForm(FlaskForm):
@@ -27,6 +28,7 @@ csrf = CSRFProtect(app)
 basedir = os.path.abspath(os.path.dirname(__file__))
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + os.path.join(basedir, 'your_database.db')
 db = SQLAlchemy(app)
+migrate = Migrate(app, db)
 login_manager = LoginManager(app)
 login_manager.login_view = 'login'
 app.config['SQLALCHEMY_ECHO'] = True
@@ -36,9 +38,8 @@ class User(UserMixin, db.Model):
     __tablename__ = 'users'
     id = db.Column(db.Integer, primary_key=True)
     login = db.Column(db.String(50), unique=True, nullable=False)
-    password = db.Column(db.String(100), nullable=False)
+    password_hash = db.Column('pass', db.String(100), nullable=False)  # Используем имя столбца из БД
     role = db.Column(db.String(20), nullable=False, default='user')
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     def is_self(self):
         return self.id == current_user.id
@@ -46,7 +47,7 @@ class User(UserMixin, db.Model):
 
 class RegistrationForm(FlaskForm):
     login = StringField('Логин', validators=[DataRequired()])
-    password = PasswordField('Пароль', validators=[
+    password_hash = PasswordField('Пароль', validators=[
         DataRequired(),
         EqualTo('confirm_password', message='Пароли должны совпадать')
     ])
@@ -85,7 +86,7 @@ def login():
     form = LoginForm()
     if form.validate_on_submit():
         user = User.query.filter_by(login=form.login.data).first()
-        if user and check_password_hash(user.password, form.password.data):
+        if user and check_password_hash(user.password_hash, form.password.data):
             login_user(user)
             next_page = request.args.get('next')
             return redirect(next_page or url_for('dashboard'))
@@ -102,10 +103,10 @@ def register():
             flash('Этот логин уже занят')
             return redirect(url_for('register'))
 
-        hashed_password = generate_password_hash(form.password.data)
+        hashed_password = generate_password_hash(form.password_hash.data)
         new_user = User(
             login=form.login.data,
-            password=hashed_password,
+            password_hash=generate_password_hash(form.password_hash.data),
             role='user'  # По умолчанию регистрируем как обычного пользователя
         )
         db.session.add(new_user)
@@ -224,7 +225,7 @@ def create_admin():
         if not User.query.filter_by(login='admin').first():
             admin = User(
                 login='admin',
-                password=generate_password_hash('!project_admin'),
+                password_hash=generate_password_hash('!project_admin'),
                 role='admin'
             )
             db.session.add(admin)
