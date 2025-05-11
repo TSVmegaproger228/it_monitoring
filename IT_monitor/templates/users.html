@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Управление пользователями</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        .user-table {
+            margin-top: 20px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        }
+        .admin-badge {
+            background-color: #dc3545 !important;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2 class="my-4">Список пользователей</h2>
+
+        <!-- Таблица пользователей -->
+        <table class="table table-hover">
+    <thead>
+        <tr>
+            <th>ID</th>
+            <th>Логин</th>
+            <th>Роль</th>
+            <th>Дата регистрации</th>
+            <th>Действия</th> <!-- Новый столбец -->
+        </tr>
+    </thead>
+    <tbody>
+        {% for user in users %}
+        <tr>
+            <td>{{ user.id }}</td>
+            <td>{{ user.login }}</td>
+            <td>
+                <span class="badge bg-{% if user.role == 'admin' %}danger{% else %}primary{% endif %}">
+                    {{ user.role }}
+                </span>
+            </td>
+            <td>{{ user.created_at.strftime('%d.%m.%Y %H:%M') }}</td>
+
+            <!-- Вот сюда вставляем кнопку -->
+            <td>
+                <a href="{{ url_for('manage_user_role', user_id=user.id) }}"
+                   class="btn btn-sm btn-warning"
+                   title="Изменить роль">
+                    <i class="bi bi-pencil"></i>
+                </a>
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+    </div>
+</body>
+</html>

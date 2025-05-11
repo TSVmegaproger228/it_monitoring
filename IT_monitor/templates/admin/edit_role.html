@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="container mt-4">
+    <h2>Изменение роли для {{ user.login }}</h2>
+
+    <div class="card shadow">
+        <div class="card-body">
+            <form method="POST">
+    {{ form.hidden_tag() }}
+
+    <div class="mb-3">
+        {{ form.role.label(class="form-label") }}
+        {{ form.role(class="form-select") }}
+    </div>
+
+    <div class="d-grid gap-2 d-md-flex justify-content-md-end">
+        <button type="submit" class="btn btn-primary">
+            <i class="bi bi-save"></i> Сохранить
+        </button>
+        <a href="{{ url_for('manage_users') }}" class="btn btn-secondary">
+            <i class="bi bi-x-circle"></i> Отмена
+        </a>
+    </div>
+</form>
+        </div>
+    </div>
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        {% if user.id == current_user.id %}
+            // Блокируем всю форму
+            const form = document.querySelector('form');
+            if (form) {
+                form.querySelectorAll('input, select, button').forEach(element => {
+                    element.disabled = true;
+                });
+                // Добавляем предупреждение
+                const warning = document.createElement('div');
+                warning.className = 'alert alert-danger mt-3';
+                warning.innerHTML = `
+                    <i class="bi bi-exclamation-triangle"></i>
+                    Редактирование собственной роли заблокировано системой!
+                `;
+                form.parentNode.insertBefore(warning, form);
+            }
+        {% endif %}
+    });
+    </script>
+</div>
+{% endblock %}
