@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container-fluid">
+    <h1 class="h3 mb-2 text-gray-800">Оповещения</h1>
+
+    <div class="card shadow mb-4">
+        <div class="card-header py-3">
+            <h6 class="m-0 font-weight-bold text-primary">Активные оповещения</h6>
+        </div>
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-bordered">
+                    <thead>
+                        <tr>
+                            <th>Время</th>
+                            <th>Устройство</th>
+                            <th>Сообщение</th>
+                            <th>Важность</th>
+                            <th>Действия</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for alert in alerts %}
+                        <tr>
+                            <td>{{ alert.timestamp.strftime('%Y-%m-%d %H:%M') }}</td>
+                            <td>{{ alert.device.name }}</td>
+                            <td>{{ alert.message }}</td>
+                            <td>
+                                <span class="badge bg-{{ 'danger' if alert.severity == 'high' else 'warning' }}">
+                                    {{ alert.severity }}
+                                </span>
+                            </td>
+                            <td>
+                                <form method="POST" action="{{ url_for('resolve_alert', id=alert.id) }}" style="display: inline;">
+                                    <button type="submit" class="btn btn-sm btn-success">Решено</button>
+                                </form>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

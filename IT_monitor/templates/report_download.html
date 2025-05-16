@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container mt-5 text-center">
+    <div class="card shadow p-5">
+        <h2 class="mb-4">Отчет готов к скачиванию</h2>
+        <p>Нажмите кнопку ниже, чтобы скачать отчет в формате CSV</p>
+        <a href="{{ url_for('generate_device_report') }}" class="btn btn-primary btn-lg">
+            <i class="fas fa-download me-2"></i>Скачать отчет
+        </a>
+    </div>
+</div>
+{% endblock %}

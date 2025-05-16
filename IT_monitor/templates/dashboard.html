@@ -1,0 +1,114 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container-fluid">
+    <h1 class="mt-4">Панель мониторинга</h1>
+
+    <!-- Карточки статистики -->
+    <div class="row mt-4">
+        <div class="col-xl-3 col-md-6 mb-4">
+            <div class="card border-left-primary shadow h-100 py-2">
+                <div class="card-body">
+                    <div class="row no-gutters align-items-center">
+                        <div class="col mr-2">
+                            <div class="text-xs font-weight-bold text-primary mb-1">
+                                Всего устройств</div>
+                            <div class="h5 mb-0 font-weight-bold text-gray-800">{{ total_devices }}</div>
+                        </div>
+                        <div class="col-auto">
+                            <i class="fas fa-server fa-2x text-gray-300"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-xl-3 col-md-6 mb-4">
+            <div class="card border-left-success shadow h-100 py-2">
+                <div class="card-body">
+                    <div class="row no-gutters align-items-center">
+                        <div class="col mr-2">
+                            <div class="text-xs font-weight-bold text-success mb-1">
+                                Устройств онлайн</div>
+                            <div class="h5 mb-0 font-weight-bold text-gray-800">{{ online_devices }}</div>
+                        </div>
+                        <div class="col-auto">
+                            <i class="fas fa-check-circle fa-2x text-gray-300"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Графики -->
+    <div class="row">
+        <div class="col-lg-6 mb-4">
+            <div class="card shadow mb-4">
+                <div class="card-header py-3">
+                    <h6 class="m-0 font-weight-bold text-primary">Доступность за 24 часа</h6>
+                </div>
+                <div class="card-body">
+                    <div class="chart-area">
+                        <canvas id="availabilityChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Проблемные устройства -->
+    <div class="card shadow mb-4">
+        <div class="card-header py-3">
+            <h6 class="m-0 font-weight-bold text-danger">Проблемные устройства</h6>
+        </div>
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-bordered">
+                    <thead>
+                        <tr>
+                            <th>Устройство</th>
+                            <th>IP</th>
+                            <th>Статус</th>
+                            <th>Последняя проверка</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for device in problem_devices %}
+                        <tr>
+                            <td>{{ device.name }}</td>
+                            <td>{{ device.ip_address }}</td>
+                            <td><span class="badge bg-danger">Offline</span></td>
+                            <td>{{ device.last_check.strftime('%Y-%m-%d %H:%M') }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+    // Инициализация графика
+    var ctx = document.getElementById('availabilityChart').getContext('2d');
+    var chart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: {{ availability_labels|safe }},
+            datasets: [{
+                label: 'Доступность (%)',
+                data: {{ availability_data|safe }},
+                borderColor: 'rgba(78, 115, 223, 1)',
+                backgroundColor: 'rgba(78, 115, 223, 0.05)',
+                pointRadius: 3,
+                pointBackgroundColor: 'rgba(78, 115, 223, 1)',
+                tension: 0.1
+            }]
+        }
+    });
+</script>
+{% endblock %}
