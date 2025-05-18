@@ -1,76 +1,94 @@
 {% extends "base.html" %}
 
 {% block content %}
-<h2>Список устройств</h2>
+<div class="container-fluid">
+    <div class="d-sm-flex align-items-center justify-content-between mb-4">
+        <h1 class="h3 mb-0 text-gray-800">Список устройств</h1>
+        <a href="{{ url_for('add_device') }}" class="btn btn-primary btn-icon-split">
+            <span class="icon text-white-50">
+                <i class="fas fa-plus"></i>
+            </span>
+            <span class="text">Добавить устройство</span>
+        </a>
+    </div>
 
-<!-- Блок управления -->
-<div class="d-flex justify-content-between mb-4">
-    <a href="{{ url_for('add_device') }}" class="btn btn-success">
-        <i class="bi bi-plus-circle"></i> Добавить устройство
-    </a>
-</div>
-
-<!-- Форма фильтрации -->
-<form method="get" action="{{ url_for('device_list') }}" class="mb-4">
-    <div class="row g-3 align-items-end">
-        <div class="col-md-3">
-            {{ form.group.label(class="form-label") }}
-            {{ form.group(class="form-select") }}
+    <!-- Форма фильтрации -->
+    <div class="card shadow mb-4">
+        <div class="card-header py-3">
+            <h6 class="m-0 font-weight-bold text-primary">Фильтры</h6>
         </div>
-        <div class="col-md-3">
-            {{ form.status.label(class="form-label") }}
-            {{ form.status(class="form-select") }}
-        </div>
-        <div class="col-md-4">
-            {{ form.search.label(class="form-label") }}
-            {{ form.search(class="form-control", placeholder="Введите название...") }}
-        </div>
-        <div class="col-md-2 d-flex gap-2">
-            <button type="submit" class="btn btn-outline-secondary">
-                <i class="bi bi-funnel"></i>
-            </button>
-            <a href="{{ url_for('device_list') }}" class="btn btn-outline-secondary">
-                <i class="bi bi-arrow-counterclockwise"></i>
-            </a>
+        <div class="card-body">
+            <form method="get" class="form-inline">
+                <div class="form-group mr-2 mb-2">
+                    {{ form.group(class="form-control") }}
+                </div>
+                <div class="form-group mr-2 mb-2">
+                    {{ form.status(class="form-control") }}
+                </div>
+                <div class="form-group mr-2 mb-2">
+                    {{ form.search(class="form-control", placeholder="Поиск...") }}
+                </div>
+                <button type="submit" class="btn btn-primary mb-2">
+                    <i class="fas fa-filter"></i> Применить
+                </button>
+                <a href="{{ url_for('device_list') }}" class="btn btn-secondary mb-2 ml-2">
+                    <i class="fas fa-sync-alt"></i> Сбросить
+                </a>
+            </form>
         </div>
     </div>
-</form>
 
-<!-- Таблица устройств -->
-<table class="table table-striped">
-    <thead>
-        <tr>
-            <th>Название</th>
-            <th>IP-адрес</th>
-            <th>Группа</th>
-            <th>Статус</th>
-            <th>Действия</th>
-        </tr>
-    </thead>
-    <tbody>
-        {% for device in devices %}
-        <tr>
-            <td>{{ device.name }}</td>
-            <td>{{ device.ip_address }}</td>
-            <td>{{ device.group }}</td>
-            <td>
-                <span class="badge bg-{% if device.status == 'online' %}success{% else %}danger{% endif %}">
-                    {{ 'Online' if device.status == 'online' else 'Offline' }}
-                </span>
-            </td>
-            <td>
-                <a href="{{ url_for('edit_device', id=device.id) }}" class="btn btn-sm btn-outline-primary">
-                    <i class="bi bi-pencil"></i>
-                </a>
-                <form action="{{ url_for('delete_device', id=device.id) }}" method="post" style="display:inline;">
-                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
-                    <button type="submit" class="btn btn-sm btn-outline-danger" onclick="return confirm('Удалить устройство?')">
-                        <i class="bi bi-trash"></i>
-                    </button>
-                </form>
-            </td>
-        </tr>
-        {% endfor %}
-    </tbody>
-</table>
+    <!-- Таблица устройств -->
+    <div class="card shadow mb-4">
+        <div class="card-header py-3">
+            <h6 class="m-0 font-weight-bold text-primary">Устройства</h6>
+        </div>
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-bordered" width="100%" cellspacing="0">
+                    <thead>
+                        <tr>
+                            <th>Название</th>
+                            <th>IP-адрес</th>
+                            <th>Группа</th>
+                            <th>Статус</th>
+                            <th>Действия</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for device in devices %}
+                        <tr>
+                            <td>{{ device.name }}</td>
+                            <td>{{ device.ip_address }}</td>
+                            <td>{{ device.group }}</td>
+                            <td>
+                                {% if device.status == 'up' %}
+                                    <span class="badge bg-success">Работает</span>
+                                {% elif device.status == 'warning' %}
+                                    <span class="badge bg-warning text-dark">Предупреждение</span>
+                                {% elif device.status == 'critical' %}
+                                    <span class="badge bg-danger">Критично</span>
+                                {% else %}
+                                    <span class="badge bg-secondary">Недоступно</span>
+                                {% endif %}
+                            </td>
+                            <td class="text-center">
+                                <a href="{{ url_for('edit_device', id=device.id) }}" class="btn btn-sm btn-primary mr-2" title="Редактировать">
+                                    <i class="fas fa-edit"></i>
+                                </a>
+                                <form action="{{ url_for('delete_device', id=device.id) }}" method="post" style="display:inline;">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                                    <button type="submit" class="btn btn-sm btn-danger" title="Удалить" onclick="return confirm('Вы уверены?')">
+                                        <i class="fas fa-trash-alt"></i>
+                                    </button>
+                                </form>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
 {% endblock %}

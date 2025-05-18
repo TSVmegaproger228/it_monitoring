@@ -78,7 +78,11 @@
                         <tr>
                             <td>{{ device.name }}</td>
                             <td>{{ device.ip_address }}</td>
-                            <td><span class="badge bg-danger">Offline</span></td>
+                            <td>
+                                <span class="badge bg-{% if device.status == 'up' %}success{% elif device.status == 'warning' %}warning{% elif device.status == 'critical' %}danger{% else %}secondary{% endif %}">
+                                    {{ device.status }}
+                                </span>
+                            </td>
                             <td>{{ device.last_check.strftime('%Y-%m-%d %H:%M') }}</td>
                         </tr>
                         {% endfor %}

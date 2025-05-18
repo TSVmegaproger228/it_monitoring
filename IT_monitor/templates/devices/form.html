@@ -3,32 +3,35 @@
 {% block content %}
 <div class="container mt-4">
     <div class="card shadow">
-        <div class="card-header">
+        <div class="card-header bg-primary text-white">
             <h4>{{ title }}</h4>
         </div>
         <div class="card-body">
-            <form method="POST" enctype="multipart/form-data">
+            <form method="POST">
                 {{ form.hidden_tag() }}
 
                 <div class="mb-3">
                     {{ form.name.label(class="form-label") }}
-                    {{ form.name(class="form-control") }}
+                    {{ form.name(class="form-control" + (' is-invalid' if form.name.errors else '')) }}
                     {% for error in form.name.errors %}
-                    <div class="text-danger">{{ error }}</div>
+                    <div class="invalid-feedback">{{ error }}</div>
                     {% endfor %}
                 </div>
 
                 <div class="mb-3">
                     {{ form.ip_address.label(class="form-label") }}
-                    {{ form.ip_address(class="form-control") }}
+                    {{ form.ip_address(class="form-control" + (' is-invalid' if form.ip_address.errors else '')) }}
                     {% for error in form.ip_address.errors %}
-                    <div class="text-danger">{{ error }}</div>
+                    <div class="invalid-feedback">{{ error }}</div>
                     {% endfor %}
                 </div>
 
                 <div class="mb-3">
                     {{ form.group.label(class="form-label") }}
-                    {{ form.group(class="form-select") }}
+                    {{ form.group(class="form-select" + (' is-invalid' if form.group.errors else '')) }}
+                    {% for error in form.group.errors %}
+                    <div class="invalid-feedback">{{ error }}</div>
+                    {% endfor %}
                 </div>
 
                 <div class="mb-3">
@@ -36,8 +39,10 @@
                     {{ form.description(class="form-control", rows=3) }}
                 </div>
 
-                <button type="submit" class="btn btn-primary">Сохранить</button>
-                <a href="{{ url_for('device_list') }}" class="btn btn-secondary">Отмена</a>
+                <div class="d-flex justify-content-end gap-2">
+                    <a href="{{ url_for('device_list') }}" class="btn btn-secondary">Отмена</a>
+                    <button type="submit" class="btn btn-primary">Сохранить</button>
+                </div>
             </form>
         </div>
     </div>

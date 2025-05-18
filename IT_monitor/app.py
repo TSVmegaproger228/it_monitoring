@@ -73,10 +73,13 @@ class Device(db.Model):
     description = db.Column(db.String(200))
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Определяем relationship здесь
     monitoring_results = db.relationship(
         'MonitoringResult',
-        backref='device',
-        lazy='dynamic'  # Это позволит использовать order_by
+        back_populates='device',
+        lazy='dynamic',
+        cascade='all, delete-orphan'
     )
 
 # Форма устройства
@@ -116,15 +119,19 @@ class FilterForm(FlaskForm):
     search = StringField('Поиск по названию')
     submit = SubmitField('Применить фильтры')
 
-# Модель результатов мониторинга
+# Обновленная модель MonitoringResult
 class MonitoringResult(db.Model):
     __tablename__ = 'monitoring_results'
     id = db.Column(db.Integer, primary_key=True)
     device_id = db.Column(db.Integer, db.ForeignKey('devices.id'), nullable=False)
     timestamp = db.Column(db.DateTime, default=datetime.utcnow)
-    is_online = db.Column(db.Boolean, nullable=False)
+    status = db.Column(db.String(20), nullable=False)  # 'up', 'warning', 'critical', 'down'
     ping_ms = db.Column(db.Float)
     port_status = db.Column(db.String(200))  # JSON с статусами портов
+    details = db.Column(db.String(500))  # Дополнительная информация
+
+    # Убрали backref здесь и определим его в модели Device
+    device = db.relationship('Device', back_populates='monitoring_results')
 
 @login_manager.user_loader
 def load_user(user_id):
@@ -148,6 +155,14 @@ class Alert(db.Model):
 
     device = db.relationship('Device')
 
+# Модель для хранения настроек мониторинга
+class MonitoringSettings(db.Model):
+    __tablename__ = 'monitoring_settings'
+    id = db.Column(db.Integer, primary_key=True)
+    check_interval = db.Column(db.Integer, default=300)  # в секундах
+    ping_timeout = db.Column(db.Float, default=2.0)  # в секундах
+    port_check_timeout = db.Column(db.Float, default=2.0)  # в секундах
+    ports_to_check = db.Column(db.String(200), default="22,80,443")  # порты через запятую
 
 def admin_required(f):
     @wraps(f)
@@ -205,13 +220,95 @@ def check_device(device):
 # Планировщик проверок
 def run_checks():
     with app.app_context():
-        devices = Device.query.all()
-        for device in devices:
-            check_device(device)
+        try:
+            settings = MonitoringSettings.query.first()
+            if not settings:
+                settings = MonitoringSettings()
+                db.session.add(settings)
+                db.session.commit()
 
-        # Запускаем следующую проверку через 5 минут
-        threading.Timer(300, run_checks).start()
+            devices = Device.query.all()
+            for device in devices:
+                check_device_status(device)
 
+            app.logger.info(f"Проверка устройств завершена. Следующая проверка через {settings.check_interval} сек.")
+        except Exception as e:
+            app.logger.error(f"Ошибка при выполнении проверок: {str(e)}")
+        finally:
+            # Запускаем следующую проверку через заданный интервал
+            settings = MonitoringSettings.query.first()
+            interval = settings.check_interval if settings else 300
+            threading.Timer(interval, run_checks).start()
+
+
+def check_port(ip, port, timeout=2.0):
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(timeout)
+        result = sock.connect_ex((ip, port))
+        sock.close()
+        return 'open' if result == 0 else 'closed'
+    except Exception as e:
+        return f'error: {str(e)}'
+
+
+def check_device_status(device):
+    settings = MonitoringSettings.query.first()
+    if not settings:
+        settings = MonitoringSettings()
+        db.session.add(settings)
+        db.session.commit()
+
+    try:
+        # Ping проверка
+        response = ping(device.ip_address, count=3, timeout=settings.ping_timeout)
+        is_online = response.success()
+        avg_ping = response.rtt_avg_ms if is_online else None
+
+        # Проверка портов
+        port_status = {}
+        ports = [int(p.strip()) for p in settings.ports_to_check.split(',') if p.strip().isdigit()]
+
+        if is_online:
+            for port in ports:
+                port_status[port] = check_port(device.ip_address, port, settings.port_check_timeout)
+
+        # Определение общего статуса
+        if not is_online:
+            status = 'down'
+        elif any(status == 'closed' for status in port_status.values()):
+            status = 'warning'
+        elif avg_ping and avg_ping > 100:  # если пинг больше 100 мс
+            status = 'warning'
+        else:
+            status = 'up'
+
+        # Сохранение результата
+        result = MonitoringResult(
+            device_id=device.id,
+            status=status,
+            ping_ms=avg_ping,
+            port_status=json.dumps(port_status),
+            details=f"Ping: {'success' if is_online else 'failed'}, Ports: {port_status}"
+        )
+        db.session.add(result)
+        db.session.commit()
+
+        # Создание оповещения при проблемах
+        if status in ['warning', 'critical', 'down']:
+            alert = Alert(
+                device_id=device.id,
+                message=f"Проблема с устройством {device.name} ({device.ip_address}): {status}",
+                severity='high' if status in ['critical', 'down'] else 'medium'
+            )
+            db.session.add(alert)
+            db.session.commit()
+
+        return status
+
+    except Exception as e:
+        app.logger.error(f"Ошибка при проверке устройства {device.id}: {str(e)}")
+        return 'error'
 
 # Маршруты
 @app.route('/', methods=['GET', 'POST'])
@@ -263,16 +360,18 @@ def logout():
 def dashboard():
     # Статистика устройств
     total_devices = Device.query.count()
+
+    # Устройства в статусе 'up' (работают)
     online_devices = db.session.query(Device).join(MonitoringResult).filter(
-        MonitoringResult.is_online == True,
+        MonitoringResult.status == 'up',
         MonitoringResult.timestamp == db.session.query(
             func.max(MonitoringResult.timestamp)
         ).filter(MonitoringResult.device_id == Device.id).correlate(Device)
     ).count()
 
-    # Проблемные устройства
+    # Проблемные устройства (не 'up')
     problem_devices = db.session.query(Device).join(MonitoringResult).filter(
-        MonitoringResult.is_online == False,
+        MonitoringResult.status != 'up',
         MonitoringResult.timestamp == db.session.query(
             func.max(MonitoringResult.timestamp)
         ).filter(MonitoringResult.device_id == Device.id).correlate(Device)
@@ -282,16 +381,21 @@ def dashboard():
     time_24h_ago = datetime.utcnow() - timedelta(hours=24)
     history = db.session.query(
         func.strftime('%Y-%m-%d %H:00', MonitoringResult.timestamp).label('hour'),
-        func.avg(case((MonitoringResult.is_online == True, 100), else_=0)).label('availability')
+        func.avg(case((MonitoringResult.status == 'up', 100), else_=0)).label('availability')
     ).filter(
         MonitoringResult.timestamp >= time_24h_ago
     ).group_by('hour').order_by('hour').all()
+
+    # Подготовка данных для графика
+    availability_labels = [h.hour for h in history]
+    availability_data = [h.availability for h in history]
 
     return render_template('dashboard.html',
                            total_devices=total_devices,
                            online_devices=online_devices,
                            problem_devices=problem_devices,
-                           availability_history=history)
+                           availability_labels=availability_labels,
+                           availability_data=availability_data)
 
 
 @app.route('/admin/manage_roles', methods=['GET', 'POST'])
@@ -427,6 +531,44 @@ def generate_device_report():
         headers={"Content-Disposition": "attachment;filename=devices_report.csv"}
     )
 
+
+@app.route('/monitoring/settings', methods=['GET', 'POST'])
+@admin_required
+def monitoring_settings():
+    settings = MonitoringSettings.query.first()
+    if not settings:
+        settings = MonitoringSettings()
+        db.session.add(settings)
+        db.session.commit()
+
+    if request.method == 'POST':
+        settings.check_interval = int(request.form.get('check_interval', 300))
+        settings.ping_timeout = float(request.form.get('ping_timeout', 2.0))
+        settings.port_check_timeout = float(request.form.get('port_check_timeout', 2.0))
+        settings.ports_to_check = request.form.get('ports_to_check', '22,80,443')
+        db.session.commit()
+        flash('Настройки мониторинга сохранены', 'success')
+        return redirect(url_for('monitoring_settings'))
+
+    return render_template('monitoring/settings.html', settings=settings)
+
+
+@app.route('/monitoring/results')
+@login_required
+def monitoring_results():
+    devices = Device.query.all()
+    for device in devices:
+        device.monitoring_results = device.monitoring_results.order_by(MonitoringResult.timestamp.desc()).limit(1).all()
+    return render_template('monitoring/results.html', devices=devices)
+
+
+@app.route('/monitoring/run_now')
+@admin_required
+def run_monitoring_now():
+    threading.Thread(target=run_checks).start()
+    flash('Проверка устройств запущена', 'success')
+    return redirect(url_for('monitoring_results'))
+
 #добавление админа через консоль
 @app.cli.command("create-admin")
 def create_admin():
@@ -515,7 +657,7 @@ def edit_device(id):
         db.session.commit()
         flash('Устройство успешно обновлено', 'success')
         return redirect(url_for('device_list'))
-    return render_template('devices/add_edit.html', form=form, title='Редактировать устройство')
+    return render_template('devices/add.html', form=form, title='Редактировать устройство')
 
 @app.route('/devices/add', methods=['GET', 'POST'])
 @login_required
@@ -532,7 +674,7 @@ def add_device():
         db.session.commit()
         flash('Устройство успешно добавлено', 'success')
         return redirect(url_for('device_list'))
-    return render_template('devices/add_edit.html', form=form, title='Добавить устройство')
+    return render_template('devices/add.html', form=form, title='Добавить устройство')
 
 @app.route('/devices/<int:id>/delete', methods=['POST'])
 @login_required
@@ -553,5 +695,8 @@ if __name__ == '__main__':
         threading.Timer(60, run_checks).start()
         for rule in app.url_map.iter_rules():
             print(f"{rule.endpoint}: {rule}")
-
+        if not MonitoringSettings.query.first():
+            db.session.add(MonitoringSettings())
+            db.session.commit()
+    threading.Timer(30, run_checks).start()
     app.run(debug=True)
