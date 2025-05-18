@@ -18,6 +18,8 @@ from sqlalchemy import func, case
 import pandas as pd
 import io
 from flask import Response
+from pythonping import ping
+
 
 
 class RoleForm(FlaskForm):
@@ -71,6 +73,11 @@ class Device(db.Model):
     description = db.Column(db.String(200))
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    monitoring_results = db.relationship(
+        'MonitoringResult',
+        backref='device',
+        lazy='dynamic'  # Это позволит использовать order_by
+    )
 
 # Форма устройства
 class DeviceForm(FlaskForm):
@@ -85,6 +92,30 @@ class DeviceForm(FlaskForm):
     description = StringField('Описание')
     submit = SubmitField('Сохранить')
 
+class FilterForm(FlaskForm):
+    group = SelectField(
+        'Группа',
+        choices=[
+            ('all', 'Все группы'),
+            ('servers', 'Серверы'),
+            ('routers', 'Роутеры'),
+            ('cameras', 'Камеры'),
+            ('other', 'Другое')
+        ],
+        default='all'
+    )
+    status = SelectField(
+        'Статус',
+        choices=[
+            ('all', 'Все статусы'),
+            ('online', 'Только онлайн'),
+            ('offline', 'Только оффлайн')
+        ],
+        default='all'
+    )
+    search = StringField('Поиск по названию')
+    submit = SubmitField('Применить фильтры')
+
 # Модель результатов мониторинга
 class MonitoringResult(db.Model):
     __tablename__ = 'monitoring_results'
@@ -95,21 +126,11 @@ class MonitoringResult(db.Model):
     ping_ms = db.Column(db.Float)
     port_status = db.Column(db.String(200))  # JSON с статусами портов
 
-    device = db.relationship('Device', backref='monitoring_results')
-
-class DeviceForm(FlaskForm):
-    name = StringField('Название')
-    submit = SubmitField('Сохранить')
-
-
 @login_manager.user_loader
 def load_user(user_id):
     return User.query.get(int(user_id))
 
 # Форма входа
-from flask_wtf import FlaskForm
-from wtforms import StringField, PasswordField
-from wtforms.validators import DataRequired
 
 class LoginForm(FlaskForm):
     login = StringField('Логин', validators=[DataRequired()])
@@ -125,7 +146,7 @@ class Alert(db.Model):
     is_resolved = db.Column(db.Boolean, default=False)
     severity = db.Column(db.String(20))  # low, medium, high
 
-    device = db.relationship('Device', backref='alerts')
+    device = db.relationship('Device')
 
 
 def admin_required(f):
@@ -446,11 +467,55 @@ def check_admin_count():
 
 @app.route('/devices')
 @login_required
-@app.route('/devices')
 def device_list():
-    devices = Device.query.all()
-    form = FilterForm()  # Создайте форму для фильтрации
+    form = FilterForm()
+    query = Device.query
+
+    # Применяем фильтры из формы
+    if request.args:  # Если есть параметры в URL (GET-запрос)
+        form.group.data = request.args.get('group', 'all')
+        form.status.data = request.args.get('status', 'all')
+        form.search.data = request.args.get('search', '')
+
+        # Фильтр по группе
+        if form.group.data != 'all':
+            query = query.filter(Device.group == form.group.data)
+
+        # Фильтр по статусу
+        if form.status.data != 'all':
+            subquery = db.session.query(MonitoringResult.device_id) \
+                .filter(MonitoringResult.timestamp == db.session.query(
+                func.max(MonitoringResult.timestamp)
+            ).filter(MonitoringResult.device_id == Device.id) \
+                        .correlate(Device)) \
+                .filter(MonitoringResult.is_online == (form.status.data == 'online'))
+
+            query = query.filter(Device.id.in_(subquery))
+
+        # Поиск по названию
+        if form.search.data:
+            query = query.filter(Device.name.ilike(f'%{form.search.data}%'))
+
+    devices = query.all()
+
+    # Добавляем статус к каждому устройству для отображения
+    for device in devices:
+        last_check = device.monitoring_results.order_by(MonitoringResult.timestamp.desc()).first()
+        device.status = 'online' if last_check and last_check.is_online else 'offline'
+
     return render_template('devices/list.html', devices=devices, form=form)
+
+@app.route('/devices/<int:id>/edit', methods=['GET', 'POST'])
+@login_required
+def edit_device(id):
+    device = Device.query.get_or_404(id)
+    form = DeviceForm(obj=device)
+    if form.validate_on_submit():
+        form.populate_obj(device)
+        db.session.commit()
+        flash('Устройство успешно обновлено', 'success')
+        return redirect(url_for('device_list'))
+    return render_template('devices/add_edit.html', form=form, title='Редактировать устройство')
 
 @app.route('/devices/add', methods=['GET', 'POST'])
 @login_required
@@ -467,19 +532,7 @@ def add_device():
         db.session.commit()
         flash('Устройство успешно добавлено', 'success')
         return redirect(url_for('device_list'))
-    return render_template('devices/form.html', form=form, title='Добавить устройство')
-
-@app.route('/devices/<int:id>/edit', methods=['GET', 'POST'])
-@login_required
-def edit_device(id):
-    device = Device.query.get_or_404(id)
-    form = DeviceForm(obj=device)
-    if form.validate_on_submit():
-        form.populate_obj(device)
-        db.session.commit()
-        flash('Устройство успешно обновлено', 'success')
-        return redirect(url_for('device_list'))
-    return render_template('devices/form.html', form=form, title='Редактировать устройство')
+    return render_template('devices/add_edit.html', form=form, title='Добавить устройство')
 
 @app.route('/devices/<int:id>/delete', methods=['POST'])
 @login_required
