@@ -2,21 +2,20 @@
 
 {% block content %}
 <div class="container-fluid">
-    <h1 class="mt-4">Панель мониторинга</h1>
+    <h1 class="h3 mb-4 text-gray-800">Панель мониторинга</h1>
 
-    <!-- Карточки статистики -->
-    <div class="row mt-4">
+    <!-- 1. Статусы устройств -->
+    <div class="row mb-4">
         <div class="col-xl-3 col-md-6 mb-4">
             <div class="card border-left-primary shadow h-100 py-2">
                 <div class="card-body">
                     <div class="row no-gutters align-items-center">
                         <div class="col mr-2">
-                            <div class="text-xs font-weight-bold text-primary mb-1">
+                            <div class="text-xs font-weight-bold text-primary text-uppercase mb-1">
                                 Всего устройств</div>
-                            <div class="h5 mb-0 font-weight-bold text-gray-800">{{ total_devices }}</div>
-                        </div>
-                        <div class="col-auto">
-                            <i class="fas fa-server fa-2x text-gray-300"></i>
+                            <div class="h5 mb-0 font-weight-bold text-gray-800">
+                                {{ status_stats.total }}
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -28,66 +27,103 @@
                 <div class="card-body">
                     <div class="row no-gutters align-items-center">
                         <div class="col mr-2">
-                            <div class="text-xs font-weight-bold text-success mb-1">
-                                Устройств онлайн</div>
-                            <div class="h5 mb-0 font-weight-bold text-gray-800">{{ online_devices }}</div>
-                        </div>
-                        <div class="col-auto">
-                            <i class="fas fa-check-circle fa-2x text-gray-300"></i>
+                            <div class="text-xs font-weight-bold text-success text-uppercase mb-1">
+                                Работают (up)</div>
+                            <div class="h5 mb-0 font-weight-bold text-gray-800">
+                                {{ status_stats.up }}
+                            </div>
                         </div>
                     </div>
                 </div>
             </div>
         </div>
-    </div>
 
-    <!-- Графики -->
-    <div class="row">
-        <div class="col-lg-6 mb-4">
-            <div class="card shadow mb-4">
-                <div class="card-header py-3">
-                    <h6 class="m-0 font-weight-bold text-primary">Доступность за 24 часа</h6>
-                </div>
+        <div class="col-xl-3 col-md-6 mb-4">
+            <div class="card border-left-warning shadow h-100 py-2">
                 <div class="card-body">
-                    <div class="chart-area">
-                        <canvas id="availabilityChart"></canvas>
+                    <div class="row no-gutters align-items-center">
+                        <div class="col mr-2">
+                            <div class="text-xs font-weight-bold text-warning text-uppercase mb-1">
+                                Проблемы (warning)</div>
+                            <div class="h5 mb-0 font-weight-bold text-gray-800">
+                                {{ status_stats.warning }}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-xl-3 col-md-6 mb-4">
+            <div class="card border-left-danger shadow h-100 py-2">
+                <div class="card-body">
+                    <div class="row no-gutters align-items-center">
+                        <div class="col mr-2">
+                            <div class="text-xs font-weight-bold text-danger text-uppercase mb-1">
+                                Недоступны (down)</div>
+                            <div class="h5 mb-0 font-weight-bold text-gray-800">
+                                {{ status_stats.down }}
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
         </div>
     </div>
 
-    <!-- Проблемные устройства -->
+    <!-- 2. Критические устройства -->
     <div class="card shadow mb-4">
         <div class="card-header py-3">
-            <h6 class="m-0 font-weight-bold text-danger">Проблемные устройства</h6>
+            <h6 class="m-0 font-weight-bold text-primary">Критические устройства</h6>
         </div>
         <div class="card-body">
+            {% if critical_devices %}
             <div class="table-responsive">
                 <table class="table table-bordered">
                     <thead>
                         <tr>
                             <th>Устройство</th>
-                            <th>IP</th>
+                            <th>IP-адрес</th>
                             <th>Статус</th>
                             <th>Последняя проверка</th>
                         </tr>
                     </thead>
                     <tbody>
-                        {% for device in problem_devices %}
+                        {% for device in critical_devices %}
                         <tr>
                             <td>{{ device.name }}</td>
                             <td>{{ device.ip_address }}</td>
                             <td>
-                                <span class="badge bg-{% if device.status == 'up' %}success{% elif device.status == 'warning' %}warning{% elif device.status == 'critical' %}danger{% else %}secondary{% endif %}">
-                                    {{ device.status }}
+                                <span class="badge bg-{% if device.last_status == 'up' %}success{% elif device.last_status == 'warning' %}warning{% else %}danger{% endif %} text-white">
+                                    {{ device.last_status }}
                                 </span>
                             </td>
-                            <td>{{ device.last_check.strftime('%Y-%m-%d %H:%M') }}</td>
+                            <td>
+                                {% if device.last_check_time %}
+                                    {{ device.last_check_time.strftime('%Y-%m-%d %H:%M') }}
+                                {% else %}
+                                    Нет данных
+                                {% endif %}
+                            </td>
                         </tr>
                         {% endfor %}
                     </tbody>
                 </table>
+            </div>
+            {% else %}
+            <div class="alert alert-success">Нет устройств с критическими состояниями</div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- 3. График доступности -->
+    <div class="card shadow mb-4">
+        <div class="card-header py-3">
+            <h6 class="m-0 font-weight-bold text-primary">Доступность за последние 24 часа</h6>
+        </div>
+        <div class="card-body">
+            <div class="chart-area">
+                <canvas id="availabilityChart"></canvas>
             </div>
         </div>
     </div>
@@ -97,21 +133,42 @@
 {% block scripts %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script>
-    // Инициализация графика
+    // График доступности
     var ctx = document.getElementById('availabilityChart').getContext('2d');
     var chart = new Chart(ctx, {
         type: 'line',
         data: {
-            labels: {{ availability_labels|safe }},
+            labels: {{ hours|tojson|safe }},
             datasets: [{
                 label: 'Доступность (%)',
-                data: {{ availability_data|safe }},
-                borderColor: 'rgba(78, 115, 223, 1)',
+                data: {{ availability|tojson|safe }},
                 backgroundColor: 'rgba(78, 115, 223, 0.05)',
-                pointRadius: 3,
+                borderColor: 'rgba(78, 115, 223, 1)',
                 pointBackgroundColor: 'rgba(78, 115, 223, 1)',
-                tension: 0.1
+                pointBorderColor: '#fff',
+                pointHoverBackgroundColor: '#fff',
+                pointHoverBorderColor: 'rgba(78, 115, 223, 1)'
             }]
+        },
+        options: {
+            scales: {
+                y: {
+                    min: 0,
+                    max: 100,
+                    ticks: {
+                        callback: function(value) {
+                            return value + '%';
+                        }
+                    }
+                }
+            },
+            tooltips: {
+                callbacks: {
+                    label: function(tooltipItem) {
+                        return tooltipItem.yLabel + '%';
+                    }
+                }
+            }
         }
     });
 </script>

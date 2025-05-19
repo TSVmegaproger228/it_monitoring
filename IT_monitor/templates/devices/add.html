@@ -4,14 +4,14 @@
 <div class="container mt-4">
     <div class="row">
         <div class="col-md-8 offset-md-2">
-            <div class="card">
+            <div class="card shadow">
                 <div class="card-header bg-primary text-white">
                     <h4 class="mb-0">
-                        <i class="bi bi-plus-circle"></i> Добавить новое устройство
+                        <i class="bi bi-plus-circle"></i> {{ title }}
                     </h4>
                 </div>
                 <div class="card-body">
-                    <form method="POST" action="{{ url_for('add_device') }}">
+                    <form method="POST">
                         {{ form.hidden_tag() }}
 
                         <div class="mb-3">
@@ -24,8 +24,16 @@
 
                         <div class="mb-3">
                             {{ form.ip_address.label(class="form-label") }}
-                            {{ form.ip_address(class="form-control" + (' is-invalid' if form.ip_address.errors else ''), placeholder="192.168.1.1") }}
+                            {{ form.ip_address(class="form-control" + (' is-invalid' if form.ip_address.errors else '')) }}
                             {% for error in form.ip_address.errors %}
+                                <div class="invalid-feedback">{{ error }}</div>
+                            {% endfor %}
+                        </div>
+
+                        <div class="mb-3">
+                            {{ form.device_type.label(class="form-label") }}
+                            {{ form.device_type(class="form-select" + (' is-invalid' if form.device_type.errors else '')) }}
+                            {% for error in form.device_type.errors %}
                                 <div class="invalid-feedback">{{ error }}</div>
                             {% endfor %}
                         </div>
@@ -36,6 +44,37 @@
                             {% for error in form.group.errors %}
                                 <div class="invalid-feedback">{{ error }}</div>
                             {% endfor %}
+                        </div>
+
+                        <div class="mb-3">
+                            {{ form.check_interval.label(class="form-label") }}
+                            {{ form.check_interval(class="form-control" + (' is-invalid' if form.check_interval.errors else '')) }}
+                            {% for error in form.check_interval.errors %}
+                                <div class="invalid-feedback">{{ error }}</div>
+                            {% endfor %}
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label">Методы мониторинга:</label>
+                            <div class="form-check">
+                                {{ form.ping(class="form-check-input") }}
+                                {{ form.ping.label(class="form-check-label") }}
+                            </div>
+                            <div class="form-check">
+                                {{ form.snmp(class="form-check-input") }}
+                                {{ form.snmp.label(class="form-check-label") }}
+                            </div>
+                            <div class="form-check">
+                                {{ form.port(class="form-check-input") }}
+                                {{ form.port.label(class="form-check-label") }}
+                            </div>
+                            {% if form.ping.errors %}
+                                <div class="invalid-feedback d-block">
+                                    {% for error in form.ping.errors %}
+                                        {{ error }}
+                                    {% endfor %}
+                                </div>
+                            {% endif %}
                         </div>
 
                         <div class="mb-3">

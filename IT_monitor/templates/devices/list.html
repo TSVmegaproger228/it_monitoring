@@ -51,7 +51,6 @@
                             <th>Название</th>
                             <th>IP-адрес</th>
                             <th>Группа</th>
-                            <th>Статус</th>
                             <th>Действия</th>
                         </tr>
                     </thead>
@@ -61,18 +60,10 @@
                             <td>{{ device.name }}</td>
                             <td>{{ device.ip_address }}</td>
                             <td>{{ device.group }}</td>
-                            <td>
-                                {% if device.status == 'up' %}
-                                    <span class="badge bg-success">Работает</span>
-                                {% elif device.status == 'warning' %}
-                                    <span class="badge bg-warning text-dark">Предупреждение</span>
-                                {% elif device.status == 'critical' %}
-                                    <span class="badge bg-danger">Критично</span>
-                                {% else %}
-                                    <span class="badge bg-secondary">Недоступно</span>
-                                {% endif %}
-                            </td>
                             <td class="text-center">
+                                <a href="{{ url_for('device_details', id=device.id) }}" class="btn btn-sm btn-info mr-2" title="Просмотр">
+                                    <i class="fas fa-eye"></i>
+                                </a>
                                 <a href="{{ url_for('edit_device', id=device.id) }}" class="btn btn-sm btn-primary mr-2" title="Редактировать">
                                     <i class="fas fa-edit"></i>
                                 </a>

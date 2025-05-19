@@ -1,0 +1,148 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="d-sm-flex align-items-center justify-content-between mb-4">
+        <h1 class="h3 mb-0 text-gray-800">Устройство: {{ device.name }}</h1>
+        <a href="{{ url_for('device_list') }}" class="btn btn-secondary">
+            <i class="fas fa-arrow-left"></i> Назад к списку
+        </a>
+    </div>
+
+    <!-- Основная информация -->
+    <div class="row">
+        <div class="col-lg-4 mb-4">
+            <div class="card shadow">
+                <div class="card-header py-3">
+                    <h6 class="m-0 font-weight-bold text-primary">Основная информация</h6>
+                </div>
+                <div class="card-body">
+<div class="mb-3">
+    <strong>Текущий статус:</strong>
+    <span class="badge bg-{% if last_result and last_result.status == 'up' %}success{% elif last_result and last_result.status == 'warning' %}warning{% else %}danger{% endif %}">
+        {{ last_result.status if last_result else 'Нет данных' }}
+    </span>
+</div>
+<div class="mb-3">
+    <strong>Последняя проверка:</strong>
+    {{ last_result.timestamp.strftime('%Y-%m-%d %H:%M:%S') if last_result else 'Нет данных' }}
+</div>
+<div class="mb-3">
+    <strong>Среднее время отклика:</strong>
+    {{ last_result.ping_ms|round(2) if last_result and last_result.ping_ms else '-' }} мс
+</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Графики -->
+        <div class="col-lg-8 mb-4">
+            <div class="card shadow mb-4">
+                <div class="card-header py-3">
+                    <h6 class="m-0 font-weight-bold text-primary">История статусов</h6>
+                </div>
+                <div class="card-body">
+                    <canvas id="statusChart"></canvas>
+                </div>
+            </div>
+
+            <div class="card shadow mb-4">
+                <div class="card-header py-3">
+                    <h6 class="m-0 font-weight-bold text-primary">Время отклика (мс)</h6>
+                </div>
+                <div class="card-body">
+                    <canvas id="pingChart"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Журнал событий -->
+    <div class="card shadow mb-4">
+        <div class="card-header py-3">
+            <h6 class="m-0 font-weight-bold text-primary">Журнал событий</h6>
+        </div>
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-bordered">
+                    <thead>
+                        <tr>
+                            <th>Дата/время</th>
+                            <th>Статус</th>
+                            <th>Время отклика</th>
+                            <th>Детали</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for event in events %}
+                        <tr>
+                            <td>{{ event.timestamp.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+                            <td>
+                                <span class="badge bg-{% if event.status == 'up' %}success{% elif event.status == 'warning' %}warning{% else %}danger{% endif %}">
+                                    {{ event.status }}
+                                </span>
+                            </td>
+                            <td>{{ event.ping_ms|round(2) if event.ping_ms else '-' }} мс</td>
+                            <td>{{ event.details }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+    var timestamps = {{ timestamps|tojson|safe if timestamps else []|tojson|safe }};
+    var statusData = {{ status_values|tojson|safe if status_values else []|tojson|safe }};
+    var pingData = {{ ping_times|tojson|safe if ping_times else []|tojson|safe }};
+</script>
+<script>
+    // График статусов
+    var statusCtx = document.getElementById('statusChart').getContext('2d');
+    new Chart(statusCtx, {
+        type: 'line',
+        data: {
+            labels: {{ timestamps|tojson|safe }},
+            datasets: [{
+                label: 'Статус (1=up, 0=down)',
+                data: {{ status_values|tojson|safe }},
+                borderColor: 'rgba(78, 115, 223, 1)',
+                backgroundColor: 'rgba(78, 115, 223, 0.1)',
+                tension: 0.1
+            }]
+        },
+        options: {
+            scales: {
+                y: {
+                    min: 0,
+                    max: 1,
+                    ticks: {
+                        stepSize: 1
+                    }
+                }
+            }
+        }
+    });
+
+    // График времени отклика
+    var pingCtx = document.getElementById('pingChart').getContext('2d');
+    new Chart(pingCtx, {
+        type: 'line',
+        data: {
+            labels: {{ timestamps|tojson|safe }},
+            datasets: [{
+                label: 'Время отклика (мс)',
+                data: {{ ping_times|tojson|safe }},
+                borderColor: 'rgba(54, 185, 204, 1)',
+                backgroundColor: 'rgba(54, 185, 204, 0.1)',
+                tension: 0.1
+            }]
+        }
+    });
+</script>
+{% endblock %}

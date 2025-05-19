@@ -1,8 +1,8 @@
 from flask_sqlalchemy import SQLAlchemy
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask_wtf import FlaskForm
-from wtforms import StringField, PasswordField, SelectField, validators, SubmitField
-from wtforms.validators import DataRequired, EqualTo
+from wtforms import StringField, PasswordField, SelectField, validators, SubmitField, BooleanField
+from wtforms.validators import DataRequired, EqualTo, IPAddress
 from datetime import datetime
 from functools import wraps
 from flask import Flask, render_template, redirect, url_for, flash, request, abort
@@ -19,7 +19,7 @@ import pandas as pd
 import io
 from flask import Response
 from pythonping import ping
-
+from enum import Enum
 
 
 class RoleForm(FlaskForm):
@@ -64,60 +64,99 @@ class RegistrationForm(FlaskForm):
     confirm_password = PasswordField('Повторите пароль')
 
 # Модель устройства
+class DeviceType(Enum):
+    SERVER = 'server'
+    ROUTER = 'router'
+    SWITCH = 'switch'
+    CAMERA = 'camera'
+    OTHER = 'other'
+
+    @classmethod
+    def choices(cls):
+        return [(member.value, member.name.capitalize()) for member in cls]
+
+    @classmethod
+    def coerce(cls, item):
+        if isinstance(item, DeviceType):
+            return item
+        try:
+            return cls(item.lower())  # Приводим к нижнему регистру для сравнения
+        except ValueError:
+            raise ValueError(f"Invalid DeviceType value: {item}")
+
+    def __str__(self):
+        return self.value
+
 class Device(db.Model):
     __tablename__ = 'devices'
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(100), nullable=False)
     ip_address = db.Column(db.String(15), nullable=False)
+    device_type = db.Column(db.Enum(DeviceType, values_callable=lambda x: [e.value for e in DeviceType]),
+                            nullable=False,
+                            default=DeviceType.OTHER)
     group = db.Column(db.String(50), nullable=False)
+    check_interval = db.Column(db.Integer, default=60)  # Интервал проверки в секундах
+    monitoring_methods = db.Column(db.String(200), default='ping')  # Методы мониторинга, хранятся как строка, разделенная запятыми.
     description = db.Column(db.String(200))
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    last_check = db.Column(db.DateTime)
 
-    # Определяем relationship здесь
     monitoring_results = db.relationship(
         'MonitoringResult',
         back_populates='device',
         lazy='dynamic',
         cascade='all, delete-orphan'
     )
+    @property
+    def last_check(self):
+        last_result = self.monitoring_results.order_by(MonitoringResult.timestamp.desc()).first()
+        return last_result.timestamp if last_result else None
 
-# Форма устройства
+# Enum для методов мониторинга
+class MonitoringMethod(Enum):
+    PING = 'ping'
+    SNMP = 'snmp'
+    PORT = 'port'
+
+    @classmethod
+    def choices(cls):
+        return [(method.value, method.name.capitalize()) for method in cls]
+
+
 class DeviceForm(FlaskForm):
     name = StringField('Название', validators=[DataRequired()])
-    ip_address = StringField('IP-адрес', validators=[DataRequired()])
+    ip_address = StringField('IP-адрес', validators=[DataRequired(), IPAddress()])
+    device_type = SelectField('Тип устройства',
+                              choices=DeviceType.choices(),
+                              validators=[DataRequired()],
+                              coerce=DeviceType.coerce)  # Добавьте coerce
     group = SelectField('Группа', choices=[
         ('servers', 'Серверы'),
         ('routers', 'Роутеры'),
         ('cameras', 'Камеры'),
         ('other', 'Другое')
     ], validators=[DataRequired()])
+    check_interval = StringField('Интервал проверки (сек)', validators=[DataRequired()])
+    ping = BooleanField('Ping')
+    snmp = BooleanField('SNMP')
+    port = BooleanField('Проверка порта')
     description = StringField('Описание')
     submit = SubmitField('Сохранить')
 
-class FilterForm(FlaskForm):
-    group = SelectField(
-        'Группа',
-        choices=[
-            ('all', 'Все группы'),
-            ('servers', 'Серверы'),
-            ('routers', 'Роутеры'),
-            ('cameras', 'Камеры'),
-            ('other', 'Другое')
-        ],
-        default='all'
-    )
-    status = SelectField(
-        'Статус',
-        choices=[
-            ('all', 'Все статусы'),
-            ('online', 'Только онлайн'),
-            ('offline', 'Только оффлайн')
-        ],
-        default='all'
-    )
-    search = StringField('Поиск по названию')
-    submit = SubmitField('Применить фильтры')
+    def validate(self, extra_validators=None):
+        if not super().validate(extra_validators=extra_validators):
+            return False
+
+        # Convert the string value to DeviceType enum
+        try:
+            self.device_type.data = DeviceType(self.device_type.data)
+        except ValueError:
+            self.device_type.errors.append('Неверный тип устройства')
+            return False
+
+        return True
 
 # Обновленная модель MonitoringResult
 class MonitoringResult(db.Model):
@@ -130,7 +169,6 @@ class MonitoringResult(db.Model):
     port_status = db.Column(db.String(200))  # JSON с статусами портов
     details = db.Column(db.String(500))  # Дополнительная информация
 
-    # Убрали backref здесь и определим его в модели Device
     device = db.relationship('Device', back_populates='monitoring_results')
 
 @login_manager.user_loader
@@ -163,6 +201,30 @@ class MonitoringSettings(db.Model):
     ping_timeout = db.Column(db.Float, default=2.0)  # в секундах
     port_check_timeout = db.Column(db.Float, default=2.0)  # в секундах
     ports_to_check = db.Column(db.String(200), default="22,80,443")  # порты через запятую
+
+class FilterForm(FlaskForm):
+    group = SelectField(
+        'Группа',
+        choices=[
+            ('all', 'Все группы'),
+            ('servers', 'Серверы'),
+            ('routers', 'Роутеры'),
+            ('cameras', 'Камеры'),
+            ('other', 'Другое')
+        ],
+        default='all'
+    )
+    status = SelectField(
+        'Статус',
+        choices=[
+            ('all', 'Все статусы'),
+            ('online', 'Только онлайн'),
+            ('offline', 'Только оффлайн')
+        ],
+        default='all'
+    )
+    search = StringField('Поиск по названию')
+    submit = SubmitField('Применить фильтры')
 
 def admin_required(f):
     @wraps(f)
@@ -311,7 +373,6 @@ def check_device_status(device):
         return 'error'
 
 # Маршруты
-@app.route('/', methods=['GET', 'POST'])
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     form = LoginForm()
@@ -355,48 +416,78 @@ def logout():
     return redirect(url_for('login'))
 
 
+@app.route('/', methods=['GET', 'POST'])
 @app.route('/dashboard')
 @login_required
 def dashboard():
-    # Статистика устройств
-    total_devices = Device.query.count()
-
-    # Устройства в статусе 'up' (работают)
-    online_devices = db.session.query(Device).join(MonitoringResult).filter(
-        MonitoringResult.status == 'up',
+    # 1. Общее количество устройств по статусам
+    status_counts = db.session.query(
+        MonitoringResult.status,
+        func.count(MonitoringResult.id)
+    ).join(
+        MonitoringResult.device
+    ).filter(
         MonitoringResult.timestamp == db.session.query(
             func.max(MonitoringResult.timestamp)
-        ).filter(MonitoringResult.device_id == Device.id).correlate(Device)
-    ).count()
+        ).filter(
+            MonitoringResult.device_id == Device.id
+        ).correlate(Device)
+    ).group_by(MonitoringResult.status).all()
 
-    # Проблемные устройства (не 'up')
-    problem_devices = db.session.query(Device).join(MonitoringResult).filter(
-        MonitoringResult.status != 'up',
+    status_stats = {
+        'total': Device.query.count(),
+        'up': 0,
+        'warning': 0,
+        'down': 0
+    }
+
+    for status, count in status_counts:
+        if status == 'up':
+            status_stats['up'] = count
+        elif status == 'warning':
+            status_stats['warning'] = count
+        elif status == 'down':
+            status_stats['down'] = count
+
+    # 2. Список устройств с критическими состояниями
+    critical_devices = db.session.query(Device).join(MonitoringResult).filter(
+        MonitoringResult.status.in_(['down', 'warning']),
         MonitoringResult.timestamp == db.session.query(
             func.max(MonitoringResult.timestamp)
-        ).filter(MonitoringResult.device_id == Device.id).correlate(Device)
+        ).filter(
+            MonitoringResult.device_id == Device.id
+        ).correlate(Device)
     ).all()
 
-    # История доступности за последние 24 часа
+    # Добавляем последний статус для каждого устройства
+    for device in critical_devices:
+        last_result = device.monitoring_results.order_by(
+            MonitoringResult.timestamp.desc()
+        ).first()
+        device.last_status = last_result.status if last_result else 'unknown'
+        device.last_check_time = last_result.timestamp if last_result else None
+
+    # 3. График доступности за последние 24 часа
     time_24h_ago = datetime.utcnow() - timedelta(hours=24)
-    history = db.session.query(
+
+    availability_data = db.session.query(
         func.strftime('%Y-%m-%d %H:00', MonitoringResult.timestamp).label('hour'),
-        func.avg(case((MonitoringResult.status == 'up', 100), else_=0)).label('availability')
+        func.avg(case(
+            (MonitoringResult.status == 'up', 100),
+            else_=0
+        )).label('availability_percent')
     ).filter(
         MonitoringResult.timestamp >= time_24h_ago
     ).group_by('hour').order_by('hour').all()
 
-    # Подготовка данных для графика
-    availability_labels = [h.hour for h in history]
-    availability_data = [h.availability for h in history]
+    hours = [row.hour for row in availability_data]
+    availability = [round(row.availability_percent, 2) for row in availability_data]
 
     return render_template('dashboard.html',
-                           total_devices=total_devices,
-                           online_devices=online_devices,
-                           problem_devices=problem_devices,
-                           availability_labels=availability_labels,
-                           availability_data=availability_data)
-
+                         status_stats=status_stats,
+                         critical_devices=critical_devices,
+                         hours=hours,
+                         availability=availability)
 
 @app.route('/admin/manage_roles', methods=['GET', 'POST'])
 @admin_required
@@ -608,42 +699,20 @@ def check_admin_count():
             abort(403, description="В системе должен быть хотя бы один администратор")
 
 @app.route('/devices')
-@login_required
 def device_list():
-    form = FilterForm()
-    query = Device.query
+    form = FilterForm(request.args) #Связываем request.args с формой
+    #Получаем данные из формы
+    selected_group = form.group.data
+    selected_status = form.status.data
+    search_term = form.search.data
 
-    # Применяем фильтры из формы
-    if request.args:  # Если есть параметры в URL (GET-запрос)
-        form.group.data = request.args.get('group', 'all')
-        form.status.data = request.args.get('status', 'all')
-        form.search.data = request.args.get('search', '')
-
-        # Фильтр по группе
-        if form.group.data != 'all':
-            query = query.filter(Device.group == form.group.data)
-
-        # Фильтр по статусу
-        if form.status.data != 'all':
-            subquery = db.session.query(MonitoringResult.device_id) \
-                .filter(MonitoringResult.timestamp == db.session.query(
-                func.max(MonitoringResult.timestamp)
-            ).filter(MonitoringResult.device_id == Device.id) \
-                        .correlate(Device)) \
-                .filter(MonitoringResult.is_online == (form.status.data == 'online'))
-
-            query = query.filter(Device.id.in_(subquery))
-
-        # Поиск по названию
-        if form.search.data:
-            query = query.filter(Device.name.ilike(f'%{form.search.data}%'))
-
-    devices = query.all()
-
-    # Добавляем статус к каждому устройству для отображения
-    for device in devices:
-        last_check = device.monitoring_results.order_by(MonitoringResult.timestamp.desc()).first()
-        device.status = 'online' if last_check and last_check.is_online else 'offline'
+    # Дальше - ваша логика фильтрации устройств на основе selected_group, selected_status, search_term
+    # Например:
+    devices = Device.query #Предположим, что Device - это ваша модель
+    if selected_group != 'all':
+        devices = devices.filter_by(group=selected_group)
+    #И так далее - добавляйте фильтры
+    devices = devices.all() #Получаем результаты
 
     return render_template('devices/list.html', devices=devices, form=form)
 
@@ -660,21 +729,32 @@ def edit_device(id):
     return render_template('devices/add.html', form=form, title='Редактировать устройство')
 
 @app.route('/devices/add', methods=['GET', 'POST'])
-@login_required
 def add_device():
     form = DeviceForm()
     if form.validate_on_submit():
+        # Преобразуем выбранные методы мониторинга в строку
+        methods = []
+        if form.ping.data:
+            methods.append('ping')
+        if form.snmp.data:
+            methods.append('snmp')
+        if form.port.data:
+            methods.append('port')
+
         device = Device(
             name=form.name.data,
             ip_address=form.ip_address.data,
-            group=form.group.data,
+            device_type=form.device_type.data,
+            group=form.group.data,  # Убедитесь, что группа передается
+            check_interval=int(form.check_interval.data),
+            monitoring_methods=','.join(methods),
             description=form.description.data
         )
         db.session.add(device)
         db.session.commit()
         flash('Устройство успешно добавлено', 'success')
         return redirect(url_for('device_list'))
-    return render_template('devices/add.html', form=form, title='Добавить устройство')
+    return render_template('devices/add.html', form=form)
 
 @app.route('/devices/<int:id>/delete', methods=['POST'])
 @login_required
@@ -684,6 +764,36 @@ def delete_device(id):
     db.session.commit()
     flash('Устройство успешно удалено', 'success')
     return redirect(url_for('device_list'))
+
+
+@app.route('/device/<int:id>')
+def device_details(id):
+    device = Device.query.get_or_404(id)
+
+    # Получаем последний результат мониторинга
+    last_result = device.monitoring_results.order_by(
+        MonitoringResult.timestamp.desc()
+    ).first()
+
+    # Получаем историю мониторинга
+    history = device.monitoring_results.order_by(
+        MonitoringResult.timestamp.desc()
+    ).limit(50).all()
+
+    # Подготовка данных для графиков
+    timestamps = [h.timestamp.strftime('%Y-%m-%d %H:%M') for h in history] if history else []
+    status_values = [1 if h.status == 'up' else 0 for h in history] if history else []
+    ping_times = [h.ping_ms for h in history] if history else []
+
+    return render_template(
+        'devices/device_details.html',
+        device=device,
+        last_result=last_result,  # Передаем последний результат
+        timestamps=timestamps or [],
+        status_values=status_values or [],
+        ping_times=ping_times or [],
+        history=history
+    )
 
 if __name__ == '__main__':
     with app.app_context():
