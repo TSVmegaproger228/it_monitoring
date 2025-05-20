@@ -1,0 +1,59 @@
+/* Стили для карты сети */
+.status-icon {
+    transition: transform 0.3s ease;
+}
+
+.device-card:hover .status-icon {
+    transform: scale(1.1);
+}
+
+/* Цвета статусов (как в dashboard) */
+.text-success {
+    color: #1cc88a !important;
+}
+
+.text-warning {
+    color: #f6c23e !important;
+}
+
+.text-danger {
+    color: #e74a3b !important;
+}
+
+/* Стили для легенды */
+.legend-icon {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-size: 1rem;
+}
+
+/* Анимация иконок статусов */
+@keyframes pulse {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.1); }
+    100% { transform: scale(1); }
+}
+
+.bg-success {
+    background-color: #28a745 !important;
+    animation: pulse 2s infinite;
+}
+
+.bg-warning {
+    background-color: #ffc107 !important;
+    animation: pulse 3s infinite;
+}
+
+.bg-danger {
+    background-color: #dc3545 !important;
+    animation: pulse 1.5s infinite;
+}
+
+.bg-secondary {
+    background-color: #6c757d !important;
+}

@@ -193,6 +193,55 @@ class Alert(db.Model):
 
     device = db.relationship('Device')
 
+# Модель для правил оповещений
+class AlertRule(db.Model):
+    __tablename__ = 'alert_rules'
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False)
+    device_type = db.Column(db.Enum(DeviceType, values_callable=lambda x: [e.value for e in DeviceType]), nullable=True)
+    device_group = db.Column(db.String(50), nullable=True)
+    event_type = db.Column(db.String(50), nullable=False)  # 'unavailable', 'threshold'
+    severity = db.Column(db.String(20), nullable=False)  # 'low', 'medium', 'high'
+    is_active = db.Column(db.Boolean, default=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+class AlertRuleForm(FlaskForm):
+    name = StringField('Название правила', validators=[DataRequired()])
+    device_type = SelectField(
+        'Тип устройства',
+        choices=[('', 'Любой')] + DeviceType.choices(),
+        coerce=lambda x: None if x == '' else DeviceType.coerce(x)
+    )
+    device_group = SelectField(
+        'Группа устройств',
+        choices=[
+            ('', 'Любая'),
+            ('servers', 'Серверы'),
+            ('routers', 'Роутеры'),
+            ('cameras', 'Камеры'),
+            ('other', 'Другое')
+        ]
+    )
+    event_type = SelectField(
+        'Тип события',
+        choices=[
+            ('unavailable', 'Недоступность'),
+            ('threshold', 'Превышение порога')
+        ],
+        validators=[DataRequired()]
+    )
+    severity = SelectField(
+        'Важность',
+        choices=[
+            ('low', 'Низкая'),
+            ('medium', 'Средняя'),
+            ('high', 'Высокая')
+        ],
+        validators=[DataRequired()]
+    )
+    is_active = BooleanField('Активно', default=True)
+    submit = SubmitField('Сохранить')
+
 # Модель для хранения настроек мониторинга
 class MonitoringSettings(db.Model):
     __tablename__ = 'monitoring_settings'
@@ -344,6 +393,26 @@ def check_device_status(device):
             status = 'warning'
         else:
             status = 'up'
+
+        # В функции check_device_status, после определения статуса:
+        if status in ['warning', 'critical', 'down']:
+            # Получаем соответствующие правила
+            rules = AlertRule.query.filter_by(
+                is_active=True
+            ).filter(
+                (AlertRule.device_type == None) | (AlertRule.device_type == device.device_type),
+                (AlertRule.device_group == None) | (AlertRule.device_group == device.group),
+                AlertRule.event_type == ('threshold' if status == 'warning' else 'unavailable')
+            ).all()
+
+            for rule in rules:
+                alert = Alert(
+                    device_id=device.id,
+                    message=f"Проблема с устройством {device.name} ({device.ip_address}): {status}",
+                    severity=rule.severity
+                )
+                db.session.add(alert)
+            db.session.commit()
 
         # Сохранение результата
         result = MonitoringResult(
@@ -581,8 +650,29 @@ def manage_users():
 @app.route('/alerts')
 @login_required
 def alert_list():
-    alerts = Alert.query.filter_by(is_resolved=False).order_by(Alert.timestamp.desc()).all()
-    return render_template('alerts/list.html', alerts=alerts)
+    query = Alert.query.filter_by(is_resolved=False).join(Alert.device)
+
+    # Фильтрация по типу устройства
+    device_type = request.args.get('device_type')
+    if device_type:
+        query = query.filter(Device.device_type == device_type)
+
+    # Фильтрация по группе устройств
+    device_group = request.args.get('device_group')
+    if device_group:
+        query = query.filter(Device.group == device_group)
+
+    # Фильтрация по типу события
+    event_type = request.args.get('event_type')
+    if event_type == 'unavailable':
+        query = query.filter(Alert.message.like('%недоступно%'))
+    elif event_type == 'threshold':
+        query = query.filter(Alert.message.like('%порог%'))
+
+    alerts = query.order_by(Alert.timestamp.desc()).all()
+    return render_template('alerts/list.html',
+                           alerts=alerts,
+                           DeviceType=DeviceType)  # Передаем DeviceType в шаблон
 
 
 @app.route('/alerts/<int:id>/resolve', methods=['POST'])
@@ -698,23 +788,57 @@ def check_admin_count():
         if admins_count < 1:
             abort(403, description="В системе должен быть хотя бы один администратор")
 
+
 @app.route('/devices')
+@login_required
 def device_list():
-    form = FilterForm(request.args) #Связываем request.args с формой
-    #Получаем данные из формы
-    selected_group = form.group.data
-    selected_status = form.status.data
-    search_term = form.search.data
+    form = FilterForm(request.args)
 
-    # Дальше - ваша логика фильтрации устройств на основе selected_group, selected_status, search_term
-    # Например:
-    devices = Device.query #Предположим, что Device - это ваша модель
-    if selected_group != 'all':
-        devices = devices.filter_by(group=selected_group)
-    #И так далее - добавляйте фильтры
-    devices = devices.all() #Получаем результаты
+    # Базовый запрос с подгрузкой последнего статуса
+    subquery = db.session.query(
+        MonitoringResult.device_id,
+        func.max(MonitoringResult.timestamp).label('max_timestamp')
+    ).group_by(MonitoringResult.device_id).subquery()
 
-    return render_template('devices/list.html', devices=devices, form=form)
+    query = db.session.query(
+        Device,
+        MonitoringResult.status.label('last_status')
+    ).outerjoin(
+        subquery,
+        Device.id == subquery.c.device_id
+    ).outerjoin(
+        MonitoringResult,
+        (MonitoringResult.device_id == subquery.c.device_id) &
+        (MonitoringResult.timestamp == subquery.c.max_timestamp)
+    )
+
+    # Применяем фильтры
+    if form.group.data != 'all':
+        query = query.filter(Device.group == form.group.data)
+
+    if form.status.data != 'all':
+        if form.status.data == 'online':
+            query = query.filter(MonitoringResult.status == 'up')
+        elif form.status.data == 'offline':
+            query = query.filter(MonitoringResult.status.in_(['down', 'warning']))
+
+    if form.search.data:
+        search = f"%{form.search.data}%"
+        query = query.filter(Device.name.ilike(search))
+
+    # Получаем результаты
+    results = query.all()
+
+    # Формируем список устройств с последним статусом
+    devices = []
+    for device, last_status in results:
+        device.last_status = last_status or 'unknown'
+        devices.append(device)
+
+    return render_template('devices/list.html',
+                           devices=devices,
+                           form=form,
+                           DeviceType=DeviceType)
 
 @app.route('/devices/<int:id>/edit', methods=['GET', 'POST'])
 @login_required
@@ -794,6 +918,70 @@ def device_details(id):
         ping_times=ping_times or [],
         history=history
     )
+
+
+@app.route('/network_map')
+@login_required
+def network_map():
+    devices = Device.query.all()
+
+    # Добавляем последний статус для каждого устройства
+    for device in devices:
+        last_result = device.monitoring_results.order_by(
+            MonitoringResult.timestamp.desc()
+        ).first()
+        device.last_status = last_result.status if last_result else 'unknown'
+
+    # Группируем устройства по группам
+    groups = {}
+    for device in devices:
+        if device.group not in groups:
+            groups[device.group] = []
+        groups[device.group].append(device)
+
+    # Группируем устройства по типам
+    types = {}
+    for device in devices:
+        if device.device_type.value not in types:
+            types[device.device_type.value] = []
+        types[device.device_type.value].append(device)
+
+    return render_template('network_map.html',
+                           groups=groups,
+                           types=types,
+                           DeviceType=DeviceType)
+
+
+@app.route('/alerts/rules', methods=['GET', 'POST'])
+@admin_required
+def alert_rules():
+    form = AlertRuleForm()
+    if form.validate_on_submit():
+        rule = AlertRule(
+            name=form.name.data,
+            device_type=form.device_type.data,
+            device_group=form.device_group.data,
+            event_type=form.event_type.data,
+            severity=form.severity.data,
+            is_active=form.is_active.data
+        )
+        db.session.add(rule)
+        db.session.commit()
+        flash('Правило успешно создано', 'success')
+        return redirect(url_for('alert_rules'))
+
+    rules = AlertRule.query.order_by(AlertRule.created_at.desc()).all()
+    return render_template('alerts/rules.html', form=form, rules=rules)
+
+
+@app.route('/alerts/rules/<int:id>/delete', methods=['POST'])
+@admin_required
+def delete_alert_rule(id):
+    rule = AlertRule.query.get_or_404(id)
+    db.session.delete(rule)
+    db.session.commit()
+    flash('Правило удалено', 'success')
+    return redirect(url_for('alert_rules'))
 
 if __name__ == '__main__':
     with app.app_context():

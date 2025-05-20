@@ -50,7 +50,9 @@
                         <tr>
                             <th>Название</th>
                             <th>IP-адрес</th>
+                            <th>Тип</th>
                             <th>Группа</th>
+                            <th>Статус</th>
                             <th>Действия</th>
                         </tr>
                     </thead>
@@ -59,11 +61,24 @@
                         <tr>
                             <td>{{ device.name }}</td>
                             <td>{{ device.ip_address }}</td>
+                            <td>{{ device.device_type.value }}</td>
                             <td>{{ device.group }}</td>
+                            <td>
+                                {% if device.last_status == 'up' %}
+                                    <span class="badge badge-success">Online</span>
+                                {% elif device.last_status == 'warning' %}
+                                    <span class="badge badge-warning">Warning</span>
+                                {% elif device.last_status == 'down' %}
+                                    <span class="badge badge-danger">Offline</span>
+                                {% else %}
+                                    <span class="badge badge-secondary">Unknown</span>
+                                {% endif %}
+                            </td>
                             <td class="text-center">
                                 <a href="{{ url_for('device_details', id=device.id) }}" class="btn btn-sm btn-info mr-2" title="Просмотр">
                                     <i class="fas fa-eye"></i>
                                 </a>
+                                {% if current_user.role == 'admin' %}
                                 <a href="{{ url_for('edit_device', id=device.id) }}" class="btn btn-sm btn-primary mr-2" title="Редактировать">
                                     <i class="fas fa-edit"></i>
                                 </a>
@@ -73,7 +88,12 @@
                                         <i class="fas fa-trash-alt"></i>
                                     </button>
                                 </form>
+                                {% endif %}
                             </td>
+                        </tr>
+                        {% else %}
+                        <tr>
+                            <td colspan="6" class="text-center">Устройства не найдены</td>
                         </tr>
                         {% endfor %}
                     </tbody>

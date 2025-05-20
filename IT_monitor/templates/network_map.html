@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="d-sm-flex align-items-center justify-content-between mb-4">
+        <h1 class="h3 mb-0 text-gray-800">Карта сети</h1>
+        <div class="btn-group">
+            <button type="button" class="btn btn-sm btn-outline-secondary active" id="arrangeByGroup">
+                Группировать по группам
+            </button>
+            <button type="button" class="btn btn-sm btn-outline-secondary" id="arrangeByType">
+                Группировать по типам
+            </button>
+        </div>
+    </div>
+
+    <!-- Легенда -->
+    <div class="card mb-4">
+        <div class="card-header py-3 d-flex justify-content-between align-items-center">
+            <h6 class="m-0 font-weight-bold text-primary">Легенда статусов</h6>
+            <div>
+                <span class="badge bg-success text-white mr-2">
+                    <i class="fas fa-check-circle"></i> Работают (up)
+                </span>
+                <span class="badge bg-warning text-white mr-2">
+                    <i class="fas fa-exclamation-triangle"></i> Проблемы (warning)
+                </span>
+                <span class="badge bg-danger text-white">
+                    <i class="fas fa-times-circle"></i> Недоступны (down)
+                </span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Карта сети -->
+    <div class="card shadow mb-4">
+        <div class="card-header py-3">
+            <h6 class="m-0 font-weight-bold text-primary">Топология сети</h6>
+        </div>
+        <div class="card-body">
+            <div id="network-map" style="min-height: 500px; position: relative;">
+                <!-- Группировка по группам -->
+                <div id="group-view">
+                    {% for group, devices in groups.items() %}
+                    <div class="device-group mb-4" data-group="{{ group }}">
+                        <h5 class="mb-3">
+                            <i class="fas fa-folder-open"></i> {{ group|capitalize }}
+                        </h5>
+                        <div class="d-flex flex-wrap">
+                            {% for device in devices %}
+                            {% include '_device_card.html' %}
+                            {% endfor %}
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+
+                <!-- Группировка по типам -->
+                <div id="type-view" style="display: none;">
+                    {% for type_name, devices in types.items() %}
+                    <div class="device-group mb-4" data-type="{{ type_name }}">
+                        <h5 class="mb-3">
+                            <i class="fas fa-tag"></i> {{ type_name|capitalize }}
+                        </h5>
+                        <div class="d-flex flex-wrap">
+                            {% for device in devices %}
+                            {% include '_device_card.html' %}
+                            {% endfor %}
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+$(document).ready(function() {
+    // Изначально скрываем type-view
+    $('#type-view').hide();
+
+    // Переключение между группировкой по группам и типам
+    $('#arrangeByGroup').click(function() {
+        $('#group-view').show();
+        $('#type-view').hide();
+        $(this).removeClass('btn-outline-secondary').addClass('active');
+        $('#arrangeByType').removeClass('active').addClass('btn-outline-secondary');
+    });
+
+    $('#arrangeByType').click(function() {
+        $('#group-view').hide();
+        $('#type-view').show();
+        $(this).removeClass('btn-outline-secondary').addClass('active');
+        $('#arrangeByGroup').removeClass('active').addClass('btn-outline-secondary');
+    });
+});
+</script>
+{% endblock %}
