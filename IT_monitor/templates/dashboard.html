@@ -131,8 +131,10 @@
 {% endblock %}
 
 {% block scripts %}
+{{ super() }}
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script>
+$(document).ready(function() {
     // График доступности
     var ctx = document.getElementById('availabilityChart').getContext('2d');
     var chart = new Chart(ctx, {
@@ -171,5 +173,6 @@
             }
         }
     });
+});
 </script>
 {% endblock %}

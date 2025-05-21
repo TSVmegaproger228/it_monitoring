@@ -57,3 +57,10 @@
 .bg-secondary {
     background-color: #6c757d !important;
 }
+
+.badge-counter {
+    position: absolute;
+    top: -5px;
+    right: -5px;
+    font-size: 0.7rem;
+}

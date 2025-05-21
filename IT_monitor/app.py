@@ -5,7 +5,7 @@ from wtforms import StringField, PasswordField, SelectField, validators, SubmitF
 from wtforms.validators import DataRequired, EqualTo, IPAddress
 from datetime import datetime
 from functools import wraps
-from flask import Flask, render_template, redirect, url_for, flash, request, abort
+from flask import Flask, render_template, redirect, url_for, flash, request, abort, jsonify
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
 import os
 from flask_wtf.csrf import CSRFProtect
@@ -20,6 +20,7 @@ import io
 from flask import Response
 from pythonping import ping
 from enum import Enum
+import csv
 
 
 class RoleForm(FlaskForm):
@@ -189,7 +190,10 @@ class Alert(db.Model):
     message = db.Column(db.String(200), nullable=False)
     timestamp = db.Column(db.DateTime, default=datetime.utcnow)
     is_resolved = db.Column(db.Boolean, default=False)
+    resolved_at = db.Column(db.DateTime)
     severity = db.Column(db.String(20))  # low, medium, high
+    event_type = db.Column(db.String(50))  # unavailable, threshold
+    notification_sent = db.Column(db.Boolean, default=False)
 
     device = db.relationship('Device')
 
@@ -680,9 +684,14 @@ def alert_list():
 def resolve_alert(id):
     alert = Alert.query.get_or_404(id)
     alert.is_resolved = True
+    alert.resolved_at = datetime.utcnow()
     db.session.commit()
     flash('Оповещение помечено как решенное', 'success')
-    return redirect(url_for('alert_list'))
+
+    if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+        return jsonify({'success': True})
+
+    return redirect(request.referrer or url_for('alert_list'))
 
 
 # Генерация отчетов
@@ -893,6 +902,7 @@ def delete_device(id):
 @app.route('/device/<int:id>')
 def device_details(id):
     device = Device.query.get_or_404(id)
+    events = device.monitoring_results.order_by(MonitoringResult.timestamp.desc()).limit(50).all()
 
     # Получаем последний результат мониторинга
     last_result = device.monitoring_results.order_by(
@@ -916,7 +926,8 @@ def device_details(id):
         timestamps=timestamps or [],
         status_values=status_values or [],
         ping_times=ping_times or [],
-        history=history
+        history=history,
+        events=events
     )
 
 
@@ -982,6 +993,389 @@ def delete_alert_rule(id):
     db.session.commit()
     flash('Правило удалено', 'success')
     return redirect(url_for('alert_rules'))
+
+
+@app.route('/alerts/history')
+@login_required
+def alert_history():
+    page = request.args.get('page', 1, type=int)
+    per_page = 20
+
+    query = Alert.query.join(Alert.device)
+
+    # Фильтрация
+    device_type = request.args.get('device_type')
+    if device_type:
+        query = query.filter(Device.device_type == device_type)
+
+    device_group = request.args.get('device_group')
+    if device_group:
+        query = query.filter(Device.group == device_group)
+
+    event_type = request.args.get('event_type')
+    if event_type:
+        query = query.filter(Alert.event_type == event_type)
+
+    status = request.args.get('status')
+    if status == 'resolved':
+        query = query.filter(Alert.is_resolved == True)
+    elif status == 'active':
+        query = query.filter(Alert.is_resolved == False)
+
+    alerts = query.order_by(Alert.timestamp.desc()).paginate(page=page, per_page=per_page)
+
+    return render_template('alerts/history.html',
+                           alerts=alerts,
+                           DeviceType=DeviceType)
+
+
+@app.route('/alerts/count')
+@login_required
+def alert_count():
+    try:
+        count = Alert.query.filter_by(is_resolved=False).count()
+        return jsonify({
+            'count': count,
+            'status': 'success',
+            'timestamp': datetime.utcnow().isoformat()
+        })
+    except Exception as e:
+        app.logger.error(f"Alert count error: {str(e)}")
+        return jsonify({
+            'count': 0,
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
+@app.route('/alerts/latest')
+@login_required
+def latest_alerts():
+    alerts = Alert.query.filter_by(is_resolved=False).order_by(Alert.timestamp.desc()).limit(5).all()
+    return render_template('alerts/latest.html', alerts=alerts)
+
+
+# Новые маршруты для отчетности
+@app.route('/reports')
+@login_required
+def reports_dashboard():
+    return render_template('reports/dashboard.html')
+
+
+@app.route('/reports/availability', methods=['GET', 'POST'])
+@login_required
+def availability_report():
+    # Устанавливаем период по умолчанию - последние 7 дней
+    default_start = (datetime.utcnow() - timedelta(days=7)).strftime('%Y-%m-%d')
+    default_end = datetime.utcnow().strftime('%Y-%m-%d')
+
+    # Получаем параметры из запроса
+    start_date = request.args.get('start_date', default_start)
+    end_date = request.args.get('end_date', default_end)
+    device_id = request.args.get('device_id', type=int)
+    group = request.args.get('group')
+
+    try:
+        start_datetime = datetime.strptime(start_date, '%Y-%m-%d')
+        end_datetime = datetime.strptime(end_date, '%Y-%m-%d') + timedelta(
+            days=1)  # Добавляем день для включения конечной даты
+    except ValueError:
+        flash('Неверный формат даты. Используйте ГГГГ-ММ-ДД', 'danger')
+        return redirect(url_for('availability_report'))
+
+    # Базовый запрос
+    query = db.session.query(
+        Device,
+        func.avg(case(
+            (MonitoringResult.status == 'up', 100),
+            (MonitoringResult.status == 'warning', 50),
+            else_=0
+        )).label('availability_percent'),
+        func.count(MonitoringResult.id).label('total_checks'),
+        func.sum(case(
+            (MonitoringResult.status == 'up', 1),
+            else_=0
+        )).label('up_checks'),
+        func.sum(case(
+            (MonitoringResult.status == 'warning', 1),
+            else_=0
+        )).label('warning_checks'),
+        func.sum(case(
+            (MonitoringResult.status == 'down', 1),
+            else_=0
+        )).label('down_checks')
+    ).join(
+        MonitoringResult,
+        Device.id == MonitoringResult.device_id
+    ).filter(
+        MonitoringResult.timestamp >= start_datetime,
+        MonitoringResult.timestamp <= end_datetime
+    ).group_by(Device.id)
+
+    # Применяем фильтры
+    if device_id:
+        query = query.filter(Device.id == device_id)
+    if group:
+        query = query.filter(Device.group == group)
+
+    results = query.all()
+
+    # Подготовка данных для экспорта
+    if request.args.get('export') == 'csv':
+        output = io.StringIO()
+        writer = csv.writer(output)
+
+        # Заголовки
+        writer.writerow([
+            'Устройство', 'IP-адрес', 'Группа', 'Тип устройства',
+            'Доступность (%)', 'Всего проверок', 'Успешных', 'С предупреждениями', 'Неудачных'
+        ])
+
+        # Данные
+        for device, availability, total, up, warning, down in results:
+            writer.writerow([
+                device.name, device.ip_address, device.group, device.device_type.value,
+                round(availability, 2), total, up, warning, down
+            ])
+
+        output.seek(0)
+        filename = f"availability_report_{start_date}_to_{end_date}.csv"
+        return Response(
+            output,
+            mimetype="text/csv",
+            headers={"Content-Disposition": f"attachment;filename={filename}"}
+        )
+
+    # Получаем список всех устройств для фильтра
+    all_devices = Device.query.order_by(Device.name).all()
+
+    return render_template('reports/availability.html',
+                           results=results,
+                           all_devices=all_devices,
+                           start_date=start_date,
+                           end_date=end_date,
+                           selected_device_id=device_id,
+                           selected_group=group)
+
+
+@app.route('/reports/response_time', methods=['GET', 'POST'])
+@login_required
+def response_time_report():
+    # Устанавливаем период по умолчанию - последние 7 дней
+    default_start = (datetime.utcnow() - timedelta(days=7)).strftime('%Y-%m-%d')
+    default_end = datetime.utcnow().strftime('%Y-%m-%d')
+
+    # Получаем параметры из запроса
+    start_date = request.args.get('start_date', default_start)
+    end_date = request.args.get('end_date', default_end)
+    device_id = request.args.get('device_id', type=int)
+
+    try:
+        start_datetime = datetime.strptime(start_date, '%Y-%m-%d')
+        end_datetime = datetime.strptime(end_date, '%Y-%m-%d') + timedelta(days=1)
+    except ValueError:
+        flash('Неверный формат даты. Используйте ГГГГ-ММ-ДД', 'danger')
+        return redirect(url_for('response_time_report'))
+
+    # Базовый запрос для статистики по времени отклика
+    query = db.session.query(
+        Device,
+        func.avg(MonitoringResult.ping_ms).label('avg_response'),
+        func.min(MonitoringResult.ping_ms).label('min_response'),
+        func.max(MonitoringResult.ping_ms).label('max_response'),
+        func.count(MonitoringResult.id).label('total_checks')
+    ).join(
+        MonitoringResult,
+        Device.id == MonitoringResult.device_id
+    ).filter(
+        MonitoringResult.timestamp >= start_datetime,
+        MonitoringResult.timestamp <= end_datetime,
+        MonitoringResult.ping_ms.isnot(None)
+    ).group_by(Device.id)
+
+    if device_id:
+        query = query.filter(Device.id == device_id)
+
+    stats = query.all()
+
+    # Детальная статистика по дням для графика
+    daily_stats = db.session.query(
+        func.strftime('%Y-%m-%d', MonitoringResult.timestamp).label('day'),
+        func.avg(MonitoringResult.ping_ms).label('avg_response')
+    ).join(
+        Device,
+        Device.id == MonitoringResult.device_id
+    ).filter(
+        MonitoringResult.timestamp >= start_datetime,
+        MonitoringResult.timestamp <= end_datetime,
+        MonitoringResult.ping_ms.isnot(None)
+    )
+
+    if device_id:
+        daily_stats = daily_stats.filter(Device.id == device_id)
+
+    daily_stats = daily_stats.group_by('day').order_by('day').all()
+
+    # Подготовка данных для экспорта
+    if request.args.get('export') == 'csv':
+        output = io.StringIO()
+        writer = csv.writer(output)
+
+        # Заголовки
+        writer.writerow([
+            'Устройство', 'IP-адрес', 'Среднее время (мс)',
+            'Минимальное (мс)', 'Максимальное (мс)', 'Всего проверок'
+        ])
+
+        # Данные
+        for device, avg_r, min_r, max_r, total in stats:
+            writer.writerow([
+                device.name, device.ip_address,
+                round(avg_r, 2), min_r, max_r, total
+            ])
+
+        output.seek(0)
+        filename = f"response_time_report_{start_date}_to_{end_date}.csv"
+        return Response(
+            output,
+            mimetype="text/csv",
+            headers={"Content-Disposition": f"attachment;filename={filename}"}
+        )
+
+    # Подготовка данных для графика
+    days = [stat.day for stat in daily_stats]
+    avg_times = [round(stat.avg_response, 2) for stat in daily_stats]
+
+    # Получаем список всех устройств для фильтра
+    all_devices = Device.query.order_by(Device.name).all()
+
+    return render_template('reports/response_time.html',
+                           stats=stats,
+                           all_devices=all_devices,
+                           days=days,
+                           avg_times=avg_times,
+                           start_date=start_date,
+                           end_date=end_date,
+                           selected_device_id=device_id)
+
+
+@app.route('/reports/incidents', methods=['GET', 'POST'])
+@login_required
+def incidents_report():
+    # Устанавливаем период по умолчанию - последние 7 дней
+    default_start = (datetime.utcnow() - timedelta(days=7)).strftime('%Y-%m-%d')
+    default_end = datetime.utcnow().strftime('%Y-%m-%d')
+
+    # Получаем параметры из запроса
+    start_date = request.args.get('start_date', default_start)
+    end_date = request.args.get('end_date', default_end)
+    device_id = request.args.get('device_id', type=int)
+    severity = request.args.get('severity')
+
+    try:
+        start_datetime = datetime.strptime(start_date, '%Y-%m-%d')
+        end_datetime = datetime.strptime(end_date, '%Y-%m-%d') + timedelta(days=1)
+    except ValueError:
+        flash('Неверный формат даты. Используйте ГГГГ-ММ-ДД', 'danger')
+        return redirect(url_for('incidents_report'))
+
+    # Базовый запрос для статистики по инцидентам
+    query = db.session.query(
+        Device,
+        func.count(Alert.id).label('total_alerts'),
+        func.sum(case(
+            (Alert.severity == 'high', 1),
+            else_=0
+        )).label('high_alerts'),
+        func.sum(case(
+            (Alert.severity == 'medium', 1),
+            else_=0
+        )).label('medium_alerts'),
+        func.sum(case(
+            (Alert.severity == 'low', 1),
+            else_=0
+        )).label('low_alerts'),
+        func.sum(case(
+            (Alert.is_resolved == True, 1),
+            else_=0
+        )).label('resolved_alerts')
+    ).join(
+        Alert,
+        Device.id == Alert.device_id
+    ).filter(
+        Alert.timestamp >= start_datetime,
+        Alert.timestamp <= end_datetime
+    ).group_by(Device.id)
+
+    # Применяем фильтры
+    if device_id:
+        query = query.filter(Device.id == device_id)
+    if severity:
+        query = query.filter(Alert.severity == severity)
+
+    stats = query.all()
+
+    # Детальная статистика по дням для графика
+    daily_stats = db.session.query(
+        func.strftime('%Y-%m-%d', Alert.timestamp).label('day'),
+        func.count(Alert.id).label('alerts_count')
+    ).join(
+        Device,
+        Device.id == Alert.device_id
+    ).filter(
+        Alert.timestamp >= start_datetime,
+        Alert.timestamp <= end_datetime
+    )
+
+    if device_id:
+        daily_stats = daily_stats.filter(Device.id == device_id)
+    if severity:
+        daily_stats = daily_stats.filter(Alert.severity == severity)
+
+    daily_stats = daily_stats.group_by('day').order_by('day').all()
+
+    # Подготовка данных для экспорта
+    if request.args.get('export') == 'csv':
+        output = io.StringIO()
+        writer = csv.writer(output)
+
+        # Заголовки
+        writer.writerow([
+            'Устройство', 'IP-адрес', 'Всего инцидентов',
+            'Высокий приоритет', 'Средний приоритет', 'Низкий приоритет',
+            'Решено'
+        ])
+
+        # Данные
+        for device, total, high, medium, low, resolved in stats:
+            writer.writerow([
+                device.name, device.ip_address, total,
+                high, medium, low, resolved
+            ])
+
+        output.seek(0)
+        filename = f"incidents_report_{start_date}_to_{end_date}.csv"
+        return Response(
+            output,
+            mimetype="text/csv",
+            headers={"Content-Disposition": f"attachment;filename={filename}"}
+        )
+
+    # Подготовка данных для графика
+    days = [stat.day for stat in daily_stats]
+    incidents_count = [stat.alerts_count for stat in daily_stats]
+
+    # Получаем список всех устройств для фильтра
+    all_devices = Device.query.order_by(Device.name).all()
+
+    return render_template('reports/incidents.html',
+                           stats=stats,
+                           all_devices=all_devices,
+                           days=days,
+                           incidents_count=incidents_count,
+                           start_date=start_date,
+                           end_date=end_date,
+                           selected_device_id=device_id,
+                           selected_severity=severity)
 
 if __name__ == '__main__':
     with app.app_context():

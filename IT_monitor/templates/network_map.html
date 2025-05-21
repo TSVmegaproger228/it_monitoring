@@ -77,12 +77,10 @@
 {% endblock %}
 
 {% block scripts %}
+{{ super() }}  <!-- Эта строка включает скрипты из base.html -->
 <script>
 $(document).ready(function() {
-    // Изначально скрываем type-view
-    $('#type-view').hide();
-
-    // Переключение между группировкой по группам и типам
+    // Ваш специфичный для страницы код
     $('#arrangeByGroup').click(function() {
         $('#group-view').show();
         $('#type-view').hide();

@@ -95,54 +95,61 @@
 {% endblock %}
 
 {% block scripts %}
+{{ super() }}
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
 <script>
-    var timestamps = {{ timestamps|tojson|safe if timestamps else []|tojson|safe }};
-    var statusData = {{ status_values|tojson|safe if status_values else []|tojson|safe }};
-    var pingData = {{ ping_times|tojson|safe if ping_times else []|tojson|safe }};
-</script>
-<script>
+$(document).ready(function() {
+    // Данные для графиков
+    const timestamps = {{ timestamps|tojson|safe }};
+    const statusValues = {{ status_values|tojson|safe }};
+    const pingTimes = {{ ping_times|tojson|safe }};
+
+    // Инициализация графиков
     // График статусов
-    var statusCtx = document.getElementById('statusChart').getContext('2d');
-    new Chart(statusCtx, {
-        type: 'line',
-        data: {
-            labels: {{ timestamps|tojson|safe }},
-            datasets: [{
-                label: 'Статус (1=up, 0=down)',
-                data: {{ status_values|tojson|safe }},
-                borderColor: 'rgba(78, 115, 223, 1)',
-                backgroundColor: 'rgba(78, 115, 223, 0.1)',
-                tension: 0.1
-            }]
-        },
-        options: {
-            scales: {
-                y: {
-                    min: 0,
-                    max: 1,
-                    ticks: {
-                        stepSize: 1
+    if (document.getElementById('statusChart')) {
+        new Chart(
+            document.getElementById('statusChart').getContext('2d'),
+            {
+                type: 'line',
+                data: {
+                    labels: {{ timestamps|tojson|safe }},
+                    datasets: [{
+                        label: 'Статус (1=up, 0=down)',
+                        data: {{ status_values|tojson|safe }},
+                        borderColor: '#36a2eb',
+                        backgroundColor: 'rgba(54, 162, 235, 0.1)',
+                        tension: 0.1
+                    }]
+                },
+                options: {
+                    scales: {
+                        y: { min: 0, max: 1 }
                     }
                 }
             }
-        }
-    });
+        );
+    }
 
-    // График времени отклика
-    var pingCtx = document.getElementById('pingChart').getContext('2d');
-    new Chart(pingCtx, {
-        type: 'line',
-        data: {
-            labels: {{ timestamps|tojson|safe }},
-            datasets: [{
-                label: 'Время отклика (мс)',
-                data: {{ ping_times|tojson|safe }},
-                borderColor: 'rgba(54, 185, 204, 1)',
-                backgroundColor: 'rgba(54, 185, 204, 0.1)',
-                tension: 0.1
-            }]
-        }
-    });
+    // График ping
+    if (document.getElementById('pingChart')) {
+        new Chart(
+            document.getElementById('pingChart').getContext('2d'),
+            {
+                type: 'line',
+                data: {
+                    labels: {{ timestamps|tojson|safe }},
+                    datasets: [{
+                        label: 'Ping (мс)',
+                        data: {{ ping_times|tojson|safe }},
+                        borderColor: '#4bc0c0',
+                        backgroundColor: 'rgba(75, 192, 192, 0.1)',
+                        tension: 0.1
+                    }]
+                }
+            }
+        );
+    }
+});
 </script>
 {% endblock %}
