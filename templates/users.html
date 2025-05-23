@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+
+{% block title %}Управление пользователями{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="d-sm-flex align-items-center justify-content-between mb-4">
+        <h1 class="h3 mb-0 text-gray-800">Управление пользователями</h1>
+    </div>
+
+    <div class="card shadow mb-4">
+        <div class="card-header py-3">
+            <h6 class="m-0 font-weight-bold text-primary">Список пользователей</h6>
+        </div>
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-hover">
+                    <thead class="thead-light">
+                        <tr>
+                            <th>ID</th>
+                            <th>Логин</th>
+                            <th>Роль</th>
+                            <th>Действия</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for user in users %}
+                        <tr>
+                            <td>{{ user.id }}</td>
+                            <td>{{ user.login }}</td>
+                            <td>
+                                <span class="badge bg-{% if user.role == 'admin' %}danger{% else %}primary{% endif %}">
+                                    {{ user.role }}
+                                </span>
+                            </td>
+                            <td>
+                                <a href="{{ url_for('manage_user_role', user_id=user.id) }}" 
+                                   class="btn btn-sm btn-warning"
+                                   title="Изменить роль">
+                                    <i class="fas fa-pencil-alt"></i>
+                                </a>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

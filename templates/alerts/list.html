@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container-fluid">
+    <h1 class="h3 mb-2 text-gray-800">Оповещения</h1>
+
+    <!-- Фильтры оповещений -->
+    <div class="card shadow mb-4">
+        <div class="card-header py-3">
+            <h6 class="m-0 font-weight-bold text-primary">Фильтры оповещений</h6>
+        </div>
+        <div class="card-body">
+            <form method="get" class="form-inline">
+                <div class="form-group mr-2 mb-2">
+                    <select name="device_type" class="form-control">
+                        <option value="">Все типы</option>
+                        <option value="server" {% if request.args.get('device_type') == 'server' %}selected{% endif %}>Сервер</option>
+                        <option value="router" {% if request.args.get('device_type') == 'router' %}selected{% endif %}>Роутер</option>
+                        <option value="switch" {% if request.args.get('device_type') == 'switch' %}selected{% endif %}>Свитч</option>
+                        <option value="camera" {% if request.args.get('device_type') == 'camera' %}selected{% endif %}>Камера</option>
+                        <option value="other" {% if request.args.get('device_type') == 'other' %}selected{% endif %}>Другое</option>
+                    </select>
+                </div>
+                <div class="form-group mr-2 mb-2">
+                    <select name="device_group" class="form-control">
+                        <option value="">Все группы</option>
+                        <option value="servers" {% if request.args.get('device_group') == 'servers' %}selected{% endif %}>Серверы</option>
+                        <option value="routers" {% if request.args.get('device_group') == 'routers' %}selected{% endif %}>Роутеры</option>
+                        <option value="cameras" {% if request.args.get('device_group') == 'cameras' %}selected{% endif %}>Камеры</option>
+                        <option value="other" {% if request.args.get('device_group') == 'other' %}selected{% endif %}>Другое</option>
+                    </select>
+                </div>
+                <div class="form-group mr-2 mb-2">
+                    <select name="event_type" class="form-control">
+                        <option value="">Все события</option>
+                        <option value="unavailable" {% if request.args.get('event_type') == 'unavailable' %}selected{% endif %}>Недоступность</option>
+                        <option value="threshold" {% if request.args.get('event_type') == 'threshold' %}selected{% endif %}>Превышение порога</option>
+                    </select>
+                </div>
+                <button type="submit" class="btn btn-primary mb-2">
+                    <i class="fas fa-filter"></i> Применить
+                </button>
+                <a href="{{ url_for('alert_list') }}" class="btn btn-secondary mb-2 ml-2">
+                    <i class="fas fa-sync-alt"></i> Сбросить
+                </a>
+            </form>
+        </div>
+    </div>
+
+    <!-- Таблица оповещений -->
+    <div class="card shadow mb-4">
+        <div class="card-header py-3">
+            <h6 class="m-0 font-weight-bold text-primary">Активные оповещения</h6>
+        </div>
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-bordered">
+                    <thead>
+                        <tr>
+                            <th>Время</th>
+                            <th>Устройство</th>
+                            <th>Тип</th>
+                            <th>Группа</th>
+                            <th>Сообщение</th>
+                            <th>Важность</th>
+                            <th>Действия</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for alert in alerts %}
+                        <tr>
+                            <td>{{ alert.timestamp.strftime('%Y-%m-%d %H:%M') }}</td>
+                            <td>{{ alert.device.name }}</td>
+                            <td>{{ alert.device.device_type.value }}</td>
+                            <td>{{ alert.device.group }}</td>
+                            <td>{{ alert.message }}</td>
+                            <td>
+                                <span class="badge bg-{{ 'danger' if alert.severity == 'high' else 'warning' }}">
+                                    {{ alert.severity }}
+                                </span>
+                            </td>
+                            <td>
+                                <form method="POST" action="{{ url_for('resolve_alert', id=alert.id) }}" style="display: inline;">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                                    <button type="submit" class="btn btn-sm btn-success">Решено</button>
+                                </form>
+                            </td>
+                        </tr>
+                        {% else %}
+                        <tr>
+                            <td colspan="7" class="text-center">Нет активных оповещений</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

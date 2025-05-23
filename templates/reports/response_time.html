@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container mt-4">
+    <h1>Отчет по времени отклика</h1>
+    
+    <form method="get" class="mb-4">
+        <div class="row">
+            <div class="col-md-3">
+                <label for="start_date" class="form-label">Начальная дата</label>
+                <input type="date" class="form-control" id="start_date" name="start_date" value="{{ start_date }}">
+            </div>
+            <div class="col-md-3">
+                <label for="end_date" class="form-label">Конечная дата</label>
+                <input type="date" class="form-control" id="end_date" name="end_date" value="{{ end_date }}">
+            </div>
+            <div class="col-md-4">
+                <label for="device_id" class="form-label">Устройство</label>
+                <select class="form-select" id="device_id" name="device_id">
+                    <option value="">Все устройства</option>
+                    {% for device in all_devices %}
+                    <option value="{{ device.id }}" {% if selected_device_id == device.id %}selected{% endif %}>
+                        {{ device.name }} ({{ device.ip_address }})
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-2 d-flex align-items-end">
+                <button type="submit" class="btn btn-primary">Применить</button>
+            </div>
+        </div>
+        <div class="row mt-2">
+            <div class="col-md-12">
+                <a href="{{ url_for('response_time_report') }}" class="btn btn-secondary">Сбросить</a>
+                <a href="{{ url_for('response_time_report', export='csv', **request.args) }}" class="btn btn-success">
+                    Экспорт в CSV
+                </a>
+            </div>
+        </div>
+    </form>
+    
+    {% if days %}
+    <div class="card mb-4">
+        <div class="card-body">
+            <h5 class="card-title">График среднего времени отклика</h5>
+            <canvas id="responseChart" height="100"></canvas>
+        </div>
+    </div>
+    {% endif %}
+    
+    <div class="table-responsive">
+        <table class="table table-striped table-hover">
+            <thead class="table-dark">
+                <tr>
+                    <th>Устройство</th>
+                    <th>IP-адрес</th>
+                    <th>Среднее (мс)</th>
+                    <th>Минимальное (мс)</th>
+                    <th>Максимальное (мс)</th>
+                    <th>Проверок</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for stat in stats %}
+                    <tr>
+                        <td>{{ "%.2f"|format(stat.avg_response) if stat.avg_response else "—" }}</td>
+                        <td>{{ "%.2f"|format(stat.min_response) if stat.min_response else "—" }}</td>
+                        <td>{{ "%.2f"|format(stat.max_response) if stat.max_response else "—" }}</td>
+                    </tr>
+                {% else %}
+                <tr>
+                    <td colspan="6" class="text-center">Нет данных за выбранный период</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+{% if days %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+    const ctx = document.getElementById('responseChart').getContext('2d');
+    const chart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: {{ days|tojson }},
+            datasets: [{
+                label: 'Среднее время отклика (мс)',
+                data: {{ avg_times|tojson }},
+                borderColor: 'rgba(75, 192, 192, 1)',
+                backgroundColor: 'rgba(75, 192, 192, 0.2)',
+                tension: 0.1,
+                fill: true
+            }]
+        },
+        options: {
+            responsive: true,
+            scales: {
+                y: {
+                    beginAtZero: true
+                }
+            }
+        }
+    });
+</script>
+{% endif %}
+{% endblock %}

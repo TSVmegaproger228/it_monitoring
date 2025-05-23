@@ -1,0 +1,30 @@
+<div class="device-card mr-3 mb-3"
+     data-device-id="{{ device.id }}"
+     data-group="{{ device.group }}"
+     data-type="{{ device.device_type.value }}">
+    <div class="card shadow-sm" style="width: 180px;">
+        <div class="card-body text-center">
+            <div class="status-icon mb-2 text-{% if device.last_status == 'up' %}success{% elif device.last_status == 'warning' %}warning{% elif device.last_status == 'down' %}danger{% endif %}">
+                {% if device.device_type.value == 'server' %}
+                <i class="fas fa-server fa-3x"></i>
+                {% elif device.device_type.value == 'router' %}
+                <i class="fas fa-route fa-3x"></i>
+                {% elif device.device_type.value == 'switch' %}
+                <i class="fas fa-network-wired fa-3x"></i>
+                {% elif device.device_type.value == 'camera' %}
+                <i class="fas fa-video fa-3x"></i>
+                {% else %}
+                <i class="fas fa-desktop fa-3x"></i>
+                {% endif %}
+            </div>
+            <h6 class="card-title mb-1">{{ device.name }}</h6>
+            <p class="text-muted small mb-1">{{ device.ip_address }}</p>
+           <span class="badge bg-{% if device.last_status == 'up' %}success
+                                 {% elif device.last_status == 'warning' %}warning
+                                 {% elif device.last_status == 'critical' %}danger
+                                 {% else %}secondary{% endif %}">
+                {{ device.last_status }}
+            </span>
+        </div>
+    </div>
+</div>
